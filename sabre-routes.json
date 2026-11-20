@@ -1,0 +1,146 @@
+{
+  "schema": "sabre-routes-v1",
+  "routes": [
+    {
+      "routeGroup": "ICN-CKG",
+      "region": "중경",
+      "origin": "ICN",
+      "destination": "CKG",
+      "airline": "CA",
+      "depFlight": "CA440",
+      "retFlight": "CA439",
+      "days": [
+        3
+      ],
+      "endDate": "2027-10-31",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-HKT",
+      "region": "푸켓",
+      "origin": "ICN",
+      "destination": "HKT",
+      "airline": "KE",
+      "depFlight": "KE677",
+      "retFlight": "KE678",
+      "days": [
+        3
+      ],
+      "endDate": "2027-10-31",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-CNX",
+      "region": "치앙마이",
+      "origin": "ICN",
+      "destination": "CNX",
+      "airline": "KE",
+      "depFlight": "KE683",
+      "retFlight": "KE684",
+      "days": [
+        4
+      ],
+      "endDate": "2027-03-24",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-GUM",
+      "region": "괌",
+      "origin": "ICN",
+      "destination": "GUM",
+      "airline": "KE",
+      "depFlight": "KE415",
+      "retFlight": "KE416",
+      "days": [
+        3
+      ],
+      "endDate": "2027-10-31",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-TAO",
+      "region": "칭다오",
+      "origin": "ICN",
+      "destination": "TAO",
+      "airline": "KE",
+      "depFlight": "KE843",
+      "retFlight": "KE844",
+      "days": [
+        2,
+        3
+      ],
+      "endDate": "2027-10-31",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-DAD",
+      "region": "다낭",
+      "origin": "ICN",
+      "destination": "DAD",
+      "airline": "KE",
+      "depFlight": "KE457",
+      "retFlight": "KE458",
+      "days": [
+        3
+      ],
+      "endDate": "2027-10-31",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-CXR",
+      "region": "나트랑",
+      "origin": "ICN",
+      "destination": "CXR",
+      "airline": "KE",
+      "depFlight": "KE467",
+      "retFlight": "KE468",
+      "days": [
+        4
+      ],
+      "endDate": "2027-10-27",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-PQC",
+      "region": "푸꾸옥",
+      "origin": "ICN",
+      "destination": "PQC",
+      "airline": "VJ",
+      "depFlight": "VJ979",
+      "retFlight": "VJ978",
+      "days": [
+        3
+      ],
+      "endDate": "2027-10-31",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-HAN",
+      "region": "하노이",
+      "origin": "ICN",
+      "destination": "HAN",
+      "airline": "KE",
+      "depFlight": "KE445",
+      "retFlight": "KE450",
+      "days": [
+        3
+      ],
+      "endDate": "2027-10-31",
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-SGN",
+      "region": "호치민",
+      "origin": "ICN",
+      "destination": "SGN",
+      "airline": "KE",
+      "depFlight": "KE471",
+      "retFlight": "KE478",
+      "days": [
+        4
+      ],
+      "endDate": "2027-10-31",
+      "enabled": true
+    }
+  ]
+}
