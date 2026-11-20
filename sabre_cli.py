@@ -122,16 +122,16 @@ def main(argv: list[str] | None = None) -> int:
     t0, today = time.monotonic(), date.today()
     completed, failed = [], []
     grouped_done: dict[str, list[tuple[dict, int, Path]]] = {}
-    for route, days in jobs:
+    planned, issues = c.plan_jobs(jobs, start, end_override)
+    for msg in issues:
+        failed.append({"job": msg.split(":", 1)[0], "reason": msg.split(":", 1)[1].strip()})
+        log(f"제외: {msg}")
+    for route, days, job_start, end in planned:
         rg = c.route_group(route)
         name = f"{rg} {c.route_region(route)} {route['airline']} +{days}"
-        end = end_override or date.fromisoformat(route["endDate"])
-        if end < start:
-            failed.append({"job": name, "reason": f"종료일({end})이 시작일({start})보다 빠릅니다."})
-            continue
-        log(f"시작: {name} ({start} ~ {end})")
+        log(f"시작: {name} ({job_start} ~ {end})")
         try:
-            path = t.run_job(route, days, start, end, today, log, stop, background=not args.no_bg, cfg=cfg)
+            path = t.run_job(route, days, job_start, end, today, log, stop, background=not args.no_bg, cfg=cfg)
         except Exception as exc:
             failed.append({"job": name, "reason": str(exc)})
             log(f"실패: {name} - {exc}")

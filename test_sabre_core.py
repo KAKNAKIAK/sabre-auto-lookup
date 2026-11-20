@@ -529,11 +529,12 @@ class CoreTest(unittest.TestCase):
                 self.assertIsNotNone(mgr)
                 gui.open_manage_window()
                 self.assertIs(gui.manage_win, mgr)  # 중복 창 생성 방지
-                mgr.start_row_edit(0, focus_col=8)
+                mgr.start_row_edit(0, focus_col=app_mod.MANAGE_COLS.index("pax"))
                 self.assertIsNotNone(mgr.edit_state)
                 self.assertIsInstance(mgr.edit_state["widgets"]["fareOnly"], QComboBox)
                 self.assertIsInstance(mgr.edit_state["widgets"]["enabled"], QComboBox)
                 self.assertIsInstance(mgr.edit_state["widgets"]["pax"], QLineEdit)
+                self.assertIn("startDate", mgr.edit_state["widgets"])
                 rg_edit = mgr.edit_state["widgets"]["routeGroup"]
                 rg_edit.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier))
                 self.assertEqual(rg_edit.cursorPosition(), len(rg_edit.text()))
@@ -541,13 +542,16 @@ class CoreTest(unittest.TestCase):
                 self.assertEqual(rg_edit.cursorPosition(), 0)
                 mgr.edit_state["widgets"]["pax"].setText("4")
                 mgr.edit_state["widgets"]["bookingClass"].setText("S")
+                mgr.edit_state["widgets"]["startDate"].setText("2026-12-15")
                 mgr.edit_state["widgets"]["fareOnly"].setCurrentText("TOTAL KRW")
                 mgr.edit_state["widgets"]["enabled"].setCurrentText("중지")
                 self.assertTrue(mgr.commit_row_edit())
                 self.assertIsNone(mgr.edit_state)
                 saved = c.load_routes(routes_path)
-                self.assertEqual((saved[0]["pax"], saved[0]["bookingClass"], saved[0]["fareOnly"], saved[0]["enabled"]),
-                                 (4, "S", False, False))
+                self.assertEqual((saved[0]["startDate"], saved[0]["pax"], saved[0]["bookingClass"], saved[0]["fareOnly"], saved[0]["enabled"]),
+                                 ("2026-12-15", 4, "S", False, False))
+                self.assertEqual(c.effective_start(saved[0], date(2026, 11, 23)), date(2026, 12, 15))
+                self.assertEqual(c.effective_start(saved[0], date(2027, 1, 5)), date(2027, 1, 5))
                 # 노선 추가 후 Esc 취소 시 임시 행이 제거되고 목록은 변하지 않아야 한다
                 mgr.add_route_row()
                 self.assertEqual(mgr.table.rowCount(), 2)
@@ -698,10 +702,41 @@ class CoreTest(unittest.TestCase):
                     r2 = {**gui.routes[2], "airline": "OZ", "depFlight": "OZ101", "endDate": "2026-12-03"}
                     # 그룹 통합 엑셀 생성 방지를 위해 다른 routeGroup 사용
                     r2["routeGroup"] = "ICN-DAD-OZ"
-                    gui.worker([(r1, 2), (r2, 3)], date(2026, 12, 1), None)
+                    gui.worker([(r1, 2, date(2026, 12, 1), date(2026, 12, 2)),
+                                (r2, 3, date(2026, 12, 1), date(2026, 12, 3))])
                     self.assertEqual(prog_events, [(0, 5), (1, 5), (2, 5), (2, 5), (3, 5), (4, 5), (5, 5), (5, 5)])
                 finally:
                     t.run_job, gui.log = orig_run, orig_log
+                # 날짜 교집합(max 시작일, min 종료일) 및 종료일 공란/역전 실행 전 알럿 검증
+                r_no_end = c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
+                                              "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": ""})
+                self.assertTrue(c.is_complete_route(r_no_end))
+                self.assertIsNone(c.effective_end(r_no_end, None))
+                self.assertEqual(c.effective_end(r_no_end, date(2027, 5, 1)), date(2027, 5, 1))
+                r_bounded = c.normalize_route({"origin": "ICN", "destination": "BKK", "airline": "LJ",
+                                               "depFlight": "LJ001", "retFlight": "LJ002", "days": "3",
+                                               "startDate": "2026-12-10", "endDate": "2027-02-26"})
+                self.assertEqual(c.effective_end(r_bounded, date(2027, 11, 1)), date(2027, 2, 26))
+                self.assertEqual(c.effective_end(r_bounded, date(2027, 1, 15)), date(2027, 1, 15))
+                valid_p, issues_p = c.plan_jobs([(r_no_end, 2), (r_bounded, 3)], date(2027, 3, 1), None)
+                self.assertEqual(valid_p, [])
+                self.assertEqual(len(issues_p), 2)
+                self.assertIn("종료일이 설정되지 않았습니다", issues_p[0])
+                self.assertIn("실제 시작일", issues_p[1])
+                # GUI start_run 실행 전 알럿 확인
+                warns = []
+                orig_w = QMessageBox.warning
+                QMessageBox.warning = staticmethod(lambda _p, title, msg: warns.append((title, msg)))
+                try:
+                    gui.job_entries[0][1].setChecked(True)
+                    gui.start_edit.setText("2028-01-01")
+                    gui.end_edit.setText("")
+                    gui.start_run()
+                    self.assertEqual(len(warns), 1)
+                    self.assertIn("실제 시작일", warns[0][1])
+                    self.assertTrue(gui.run_btn.isEnabled())
+                finally:
+                    QMessageBox.warning = orig_w
                 mgr.close()
                 qt_app.processEvents()
             finally:

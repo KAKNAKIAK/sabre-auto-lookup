@@ -53,6 +53,49 @@ def route_fare_only(route: dict) -> bool:
     return bool(route.get("fareOnly", True))
 
 
+def route_start_date(route: dict) -> str:
+    return str(route.get("startDate") or "").strip()
+
+
+def route_end_date(route: dict) -> str:
+    return str(route.get("endDate") or "").strip()
+
+
+def effective_start(route: dict, default_start: date) -> date:
+    """노선별 조회시작일이 기준 시작일보다 늦으면 그 날짜부터 조회한다."""
+    raw = route_start_date(route)
+    if not raw:
+        return default_start
+    return max(default_start, date.fromisoformat(raw))
+
+
+def effective_end(route: dict, main_end: date | None) -> date | None:
+    """메인 종료일과 노선 조회종료일 중 더 빠른 날짜(교집합)를 반환한다."""
+    raw = route_end_date(route)
+    route_end = date.fromisoformat(raw) if raw else None
+    if main_end and route_end:
+        return min(main_end, route_end)
+    return main_end or route_end
+
+
+def plan_jobs(jobs: list[tuple[dict, int]], main_start: date,
+              main_end: date | None) -> tuple[list[tuple[dict, int, date, date]], list[str]]:
+    """선택된 노선별 실제 조회 구간(교집합)을 계산하고, 종료일 공란·기간 미중첩 사유를 분리해 반환한다."""
+    valid: list[tuple[dict, int, date, date]] = []
+    issues: list[str] = []
+    for route, days in jobs:
+        label = f"{route_group(route)} {route['depFlight']} +{days}"
+        job_start = effective_start(route, main_start)
+        job_end = effective_end(route, main_end)
+        if job_end is None:
+            issues.append(f"{label}: 종료일이 설정되지 않았습니다 (메인 종료일 또는 노선 조회종료일 필요)")
+        elif job_start > job_end:
+            issues.append(f"{label}: 실제 시작일({job_start})이 종료일({job_end})보다 늦습니다")
+        else:
+            valid.append((route, days, job_start, job_end))
+    return valid, issues
+
+
 def ddmmm(d: date) -> str:
     return f"{d.day:02d}{MONTHS[d.month - 1]}"
 
@@ -327,6 +370,7 @@ CSV_COLUMNS = (
     ("출국편", "depFlight"),
     ("귀국편", "retFlight"),
     ("항공일수", "days"),
+    ("조회시작일", "startDate"),
     ("조회종료일", "endDate"),
     ("조회인원", "pax"),
     ("조회클래스", "bookingClass"),
@@ -370,6 +414,7 @@ def export_routes_csv(path: Path, routes: list[dict]) -> None:
                 r["depFlight"],
                 r["retFlight"],
                 ",".join(map(str, r["days"])),
+                route_start_date(r),
                 r["endDate"],
                 route_pax(r),
                 route_class(r),
@@ -405,6 +450,7 @@ def import_routes_csv(path: Path) -> list[dict]:
         if not any(c.strip() for c in cols):
             continue
         raw = {headers[i]: cols[i].strip() for i in range(min(len(headers), len(cols))) if headers[i]}
+        raw["startDate"] = _normalize_csv_date(raw.get("startDate"))
         raw["endDate"] = _normalize_csv_date(raw.get("endDate"))
         raw["fareOnly"] = _parse_csv_bool(
             raw.get("fareOnly"),
@@ -426,28 +472,35 @@ def import_routes_csv(path: Path) -> list[dict]:
 
 
 def is_complete_route(route: dict) -> bool:
-    keys = ("origin", "destination", "airline", "depFlight", "retFlight", "endDate")
+    keys = ("origin", "destination", "airline", "depFlight", "retFlight")
     if not all(str(route.get(k) or "").strip() for k in keys):
         return False
     if not route.get("days"):
         return False
-    try:
-        date.fromisoformat(str(route["endDate"]).strip())
-    except ValueError:
-        return False
+    for k in ("startDate", "endDate"):
+        val = str(route.get(k) or "").strip()
+        if val:
+            try:
+                date.fromisoformat(val)
+            except ValueError:
+                return False
     return True
 
 
 def normalize_route(form: dict, *, allow_partial: bool = False) -> dict:
     days = sorted({int(x) for x in re.findall(r"\d+", str(form.get("days", "")))})
-    keys = ("origin", "destination", "airline", "depFlight", "retFlight", "endDate")
-    route = {k: str(form.get(k, "")).strip() for k in keys}
+    req_keys = ("origin", "destination", "airline", "depFlight", "retFlight")
+    route = {k: str(form.get(k, "")).strip() for k in req_keys}
     for k in ("origin", "destination", "airline", "depFlight", "retFlight"):
         route[k] = route[k].upper()
     if not allow_partial and (not all(route.values()) or not days):
         raise ValueError("모든 칸을 입력하세요. 항공일수는 2,3 처럼 쉼표로 여러 개 입력합니다.")
-    if route["endDate"]:
-        date.fromisoformat(route["endDate"])
+    start_date = str(form.get("startDate") or "").strip()
+    if start_date:
+        date.fromisoformat(start_date)
+    end_date = str(form.get("endDate") or "").strip()
+    if end_date:
+        date.fromisoformat(end_date)
     pax_raw = str(form.get("pax", "1")).strip() or "1"
     if not pax_raw.isdigit() or not (1 <= int(pax_raw) <= 9):
         raise ValueError("조회인원은 1~9 사이의 숫자로 입력하세요.")
@@ -462,6 +515,8 @@ def normalize_route(form: dict, *, allow_partial: bool = False) -> dict:
         "routeGroup": group,
         "region": region,
         **route,
+        "startDate": start_date,
+        "endDate": end_date,
         "days": days,
         "pax": pax,
         "bookingClass": booking_class,

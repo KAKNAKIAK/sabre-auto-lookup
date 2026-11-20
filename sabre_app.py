@@ -54,13 +54,14 @@ FIELDS = (
     ("출국편", "depFlight"),
     ("귀국편", "retFlight"),
     ("항공일수(+N)", "days"),
+    ("조회시작일", "startDate"),
     ("조회종료일", "endDate"),
     ("조회인원", "pax"),
     ("조회클래스", "bookingClass"),
 )
 MANAGE_COLS = tuple(k for _, k in FIELDS) + ("fareOnly", "enabled")
 MANAGE_HEADERS = tuple(lbl for lbl, _ in FIELDS) + ("운임만", "사용")
-COL_WIDTHS = (160, 76, 76, 76, 108, 108, 118, 130, 86, 94, 140, 86)
+COL_WIDTHS = (150, 70, 70, 70, 100, 100, 110, 118, 118, 80, 88, 134, 80)
 SEARCH_KEYS = ("routeGroup", "origin", "destination", "airline", "depFlight", "retFlight")
 FARE_CHOICES = ("FARE KRW", "TOTAL KRW")
 ENABLED_CHOICES = ("사용", "중지")
@@ -385,6 +386,8 @@ def clear_remembered_login(path: Path = CONFIG_PATH) -> None:
 def show(route: dict, key: str) -> str:
     if key == "routeGroup":
         return c.route_group(route)
+    if key == "startDate":
+        return c.route_start_date(route)
     if key == "pax":
         return str(c.route_pax(route))
     if key == "bookingClass":
@@ -838,7 +841,7 @@ class ManageWindow(QDialog):
             return
         row = self.table.rowCount()
         self.table.insertRow(row)
-        defaults = ["", "", "", "", "", "", "", "", "4", "Y", "FARE KRW", "사용"]
+        defaults = ["", "", "", "", "", "", "", "", "", "4", "Y", "FARE KRW", "사용"]
         for col, val in enumerate(defaults):
             item = QTableWidgetItem(val)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1414,28 +1417,39 @@ class App(QMainWindow):
         except ValueError:
             QMessageBox.critical(self, "날짜 오류", "날짜는 YYYY-MM-DD 형식으로 입력하세요.")
             return
+        planned, issues = c.plan_jobs(jobs, start, end)
+        if issues and not planned:
+            QMessageBox.warning(
+                self,
+                "조회 기간 확인",
+                "조회 가능한 노선이 없습니다.\n\n" + "\n".join(issues),
+            )
+            return
+        if issues:
+            ans = QMessageBox.question(
+                self,
+                "조회 기간 확인",
+                "아래 노선은 조회 기간 조건에 맞지 않아 제외됩니다.\n\n"
+                + "\n".join(issues)
+                + f"\n\n나머지 {len(planned)}개 항목만 조회를 진행할까요?",
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
         self.stop.clear()
         self.run_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
-        threading.Thread(target=self.worker, args=(jobs, start, end), daemon=True).start()
+        threading.Thread(target=self.worker, args=(planned,), daemon=True).start()
 
-    def worker(self, jobs, start: date, end_override) -> None:
+    def worker(self, planned: list[tuple[dict, int, date, date]]) -> None:
         done, failed, today = [], [], date.today()
         grouped_done: dict[str, list[tuple[dict, int, Path]]] = {}
         cfg = self.load_cfg()
-        planned = []
-        for route, days in jobs:
-            end = end_override or date.fromisoformat(route["endDate"])
-            day_cnt = max(0, (end - start).days + 1)
-            planned.append((route, days, end, day_cnt))
-        total_days = max(1, sum(cnt for _, _, _, cnt in planned))
+        total_days = max(1, sum((end - job_start).days + 1 for _, _, job_start, end in planned))
         done_days = 0
         self.log(f"전체 조회 시작: {len(planned)}개 항목 / 총 {total_days}일", (0, total_days))
-        for route, days, end, day_cnt in planned:
+        for route, days, job_start, end in planned:
+            day_cnt = (end - job_start).days + 1
             name = f"{c.route_region(route)} {route['airline']} +{days}"
-            if end < start:
-                failed.append(f"{name}: 종료일이 시작일보다 빠름")
-                continue
             base_days = done_days
 
             def job_log(msg: str, progress=None, _base=base_days) -> None:
@@ -1444,9 +1458,9 @@ class App(QMainWindow):
                 else:
                     self.log(msg)
 
-            self.log(f"시작: {name} ({start} ~ {end})")
+            self.log(f"시작: {name} ({job_start} ~ {end})")
             try:
-                path = t.run_job(route, days, start, end, today, job_log, self.stop, background=True, cfg=cfg)
+                path = t.run_job(route, days, job_start, end, today, job_log, self.stop, background=True, cfg=cfg)
             except (t.SessionExpired, RuntimeError) as exc:
                 failed.append(f"{name}: {exc}")
                 self.log(f"중단: {exc}")
