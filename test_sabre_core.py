@@ -6,6 +6,7 @@ from pathlib import Path
 
 import sabre_core as c
 import sabre_cli as cli
+import sabre_app as app_mod
 import sabre_terminal as t
 
 AVAIL_OUT = """101DECICNCKG¥CA
@@ -158,6 +159,113 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(c.parse_wpncb("¥FORMAT¥.", *args), c.ERR)
         # 다른 귀국편으로 운임이 나오면 쓰지 않는다
         self.assertEqual(c.parse_wpncb(WPNCB_OK.replace("439S", "441S"), *args), c.ERR)
+        # 텍스 포함 전체금액(fare_only=False)은 UI/API 모두 TOTAL 금액을 추출한다
+        self.assertEqual(c.parse_wpncb(WPNCB_OK, *args, fare_only=False), 596300)
+        self.assertEqual(c.parse_wpncb(collapsed, *args, fare_only=False), 595400)
+        self.assertEqual(c.parse_wpncb(raw_api, *args, fare_only=False), 619400)
+        # 다인 조회(pax=2)는 SS2 세그를 검증한다
+        raw_2pax = raw_api.replace("SS1", "SS2")
+        self.assertEqual(c.parse_wpncb(raw_2pax, *args, pax=2, fare_only=True), 364000)
+        self.assertEqual(c.parse_wpncb(raw_2pax, *args, pax=2, fare_only=False), 619400)
+        self.assertEqual(c.parse_wpncb(raw_api, *args, pax=2, fare_only=True), c.ERR)
+
+    def test_pax_class_and_total_fare_query_once(self):
+        self.assertEqual(c.open_class({"J": 9, "Y": 2, "B": 5}, pax=4), "B")
+        self.assertIsNone(c.open_class({"J": 9, "Y": 2, "B": 3}, pax=4))
+        self.assertEqual(c.sell_state(" 1 KE 843M 01DEC 2 ICNTAO SS2 1255 1340", "KE", 843, "01DEC", pax=2), "ok")
+        self.assertEqual(c.sell_state(" 1 KE 843M 01DEC 2 ICNTAO SS1 1255 1340", "KE", 843, "01DEC", pax=2), "error")
+        self.assertEqual(c.sell_state(" 1 KE 843M 01DEC 2 ICNTAO UC2", "KE", 843, "01DEC", pax=2), "sold")
+
+        sent = []
+        class FakeTerm:
+            def cmd(self, text, settle=0.25):
+                sent.append(text)
+                if text == "I":
+                    return "IGD"
+                if text.startswith("101DEC"):
+                    return " 01DEC TUE ICN/Z¥9 TAO/-1\n 1KE 843 J4 Y9 M3 K1 ICNTAO 1255 1340\n"
+                if text.startswith("103DEC"):
+                    return " 03DEC THU TAO/Z¥8 ICN/¥1\n 1KE 844 J4 Y9 M2 K1 TAOICN 1455 1735\n"
+                if text == "02M1":
+                    return " 1 KE 843M 01DEC 2 ICNTAO SS2" if sent.count("02M1") == 1 else " 2 KE 844M 03DEC 4 TAOICN SS2"
+                if text == "WPNCB":
+                    return (
+                        "FARE  KRW    210000\n"
+                        "TAX   KRW    153200\n"
+                        "TOTAL KRW    363200\n"
+                        " SEL KE TAO78.22KE SEL78.22NUC156.44END\n"
+                        " 1 KE 843M 01DEC 2 ICNTAO SS2  1255  1340  /DCKE /E\n"
+                        " 2 KE 844M 03DEC 4 TAOICN SS2  1455  1735  /DCKE /E\n"
+                    )
+                return ""
+
+        route = {"airline": "KE", "origin": "ICN", "destination": "TAO", "depFlight": "KE843", "retFlight": "KE844",
+                 "pax": 2, "bookingClass": "M", "fareOnly": False}
+        total = t.query_once(FakeTerm(), route, 2, date(2026, 12, 1), 0.1)
+        self.assertEqual(total, 363200)
+        self.assertIn("02M1", sent)
+        self.assertIn("WPNCB", sent)
+        self.assertNotIn("WP", sent)
+        # 요청 클래스 잔여석 부족 시 세그 판매 없이 즉시 예약마감
+        sold_route = {**route, "bookingClass": "K"}
+        sent.clear()
+        self.assertEqual(t.query_once(FakeTerm(), sold_route, 2, date(2026, 12, 1), 0.1), c.SOLD)
+        self.assertNotIn("02K1", sent)
+
+    def test_long_sell_fast_path_and_adaptive_fallback(self):
+        sent = []
+        class FastTerm:
+            long_sell = True
+            _ls_fallbacks = 0
+            def cmd(self, text, settle=0.25):
+                sent.append(text)
+                if text == "I":
+                    return "IGD"
+                if "§" in text:
+                    return " 1455 1735 4 M SEG 2 SS Y /DCKE /E"
+                if text == "WPNCB":
+                    return (
+                        "FARE  KRW    180000\n"
+                        "TOTAL KRW    333200\n"
+                        " SEL KE TAO55.87KE SEL55.87NUC111.74END\n"
+                        " 1 KE 843T 01DEC 2 ICNTAO SS1  1255  1340  /DCKE /E\n"
+                        " 2 KE 844T 03DEC 4 TAOICN SS1  1455  1735  /DCKE /E\n"
+                    )
+                return ""
+        route = {"airline": "KE", "origin": "ICN", "destination": "TAO", "depFlight": "KE843", "retFlight": "KE844"}
+        fare = t.query_once(FastTerm(), route, 2, date(2026, 12, 1), 0.1)
+        self.assertEqual(fare, 180000)
+        self.assertEqual(sent, ["I", "0KE843Y01DECICNTAONN1§0KE844Y03DECTAOICNNN1", "WPNCB"])
+
+        # Long Sell이 UC를 반환하지만 Short Sell이 연속 2회 성공하면 이후 Long Sell 자동 비활성화
+        sent2 = []
+        class RejectLongSellTerm:
+            long_sell = True
+            _ls_fallbacks = 0
+            def cmd(self, text, settle=0.25):
+                sent2.append(text)
+                if text == "I":
+                    return "IGD"
+                if "§" in text:
+                    return " 1455 1735 4 M SEG 2 UC M /DCKE"
+                if text.startswith("101DEC") or text.startswith("102DEC"):
+                    return f" {text[1:6]} TUE ICN/Z¥9 TAO/-1\n 1KE 843 Y9 M9 ICNTAO 1255 1340\n"
+                if text.startswith("103DEC") or text.startswith("104DEC"):
+                    return f" {text[1:6]} THU TAO/Z¥8 ICN/¥1\n 1KE 844 Y9 M9 TAOICN 1455 1735\n"
+                if text == "02M1":
+                    return " 1 KE 843M 01DEC 2 ICNTAO SS2" if sent2.count("02M1") % 2 == 1 else " 2 KE 844M 03DEC 4 TAOICN SS2"
+                if text == "WPNCB":
+                    return "FARE  KRW    210000\n SEL KE TAO78.22KE SEL78.22NUC156.44END\n"
+                return ""
+        term2 = RejectLongSellTerm()
+        m_route = {**route, "pax": 2, "bookingClass": "M"}
+        self.assertEqual(t.query_once(term2, m_route, 2, date(2026, 12, 1), 0.1), 210000)
+        self.assertTrue(term2.long_sell)
+        self.assertEqual(t.query_once(term2, m_route, 2, date(2026, 12, 1), 0.1), 210000)
+        self.assertFalse(term2.long_sell)
+        sent2.clear()
+        self.assertEqual(t.query_once(term2, m_route, 2, date(2026, 12, 1), 0.1), 210000)
+        self.assertFalse(any("§" in cmd for cmd in sent2))
 
     def test_find_target_host_not_query(self):
         fake = [
@@ -195,7 +303,7 @@ class CoreTest(unittest.TestCase):
                 if text.startswith("104DEC"):
                     return " 04DEC FRI CKG/Z¥8 ICN/¥1\n 1CA 439 J3 Y9 CKGICN 0830 1300\n"
                 if text.startswith("01Y"):
-                    return " 1 CA 440Y 01DEC 2 ICNCKG SS1" if len(sent) < 4 else " 2 CA 439Y 04DEC 5 CKGICN SS1"
+                    return " 1 CA 440Y 01DEC 2 ICNCKG SS1" if sent.count(text) == 1 else " 2 CA 439Y 04DEC 5 CKGICN SS1"
                 if text == "WPNCB":
                     return (
                         "NO LOWER FARE - CURRENT FARE KEPT\n"
@@ -286,10 +394,26 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(c.basis_text({**route, "region": "중경", "airline": "CA"}, 3), "인천/충칭 CA *+ 3 조회기준")
 
     def test_route_and_workbook(self):
-        r = c.normalize_route({"region": "칭다오", "origin": "icn", "destination": "tao", "airline": "ke",
+        self.assertNotIn("region", [k for _, k in app_mod.FIELDS])
+        r = c.normalize_route({"origin": "icn", "destination": "tao", "airline": "ke",
                                "depFlight": "ke 843", "retFlight": "KE844", "days": "3, 2", "endDate": "2027-10-31"})
         self.assertEqual(r["days"], [2, 3])
         self.assertEqual(r["routeGroup"], "ICN-TAO")
+        self.assertEqual(r["region"], "칭다오")
+        r_new = c.normalize_route({"origin": "ICN", "destination": "bkk", "airline": "KE",
+                                   "depFlight": "KE651", "retFlight": "KE652", "days": "3", "endDate": "2027-10-31"})
+        self.assertEqual(r_new["region"], "BKK")
+        self.assertEqual((r_new["pax"], r_new["bookingClass"], r_new["fareOnly"]), (1, "", True))
+        r_opt = c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
+                                   "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": "2027-10-31",
+                                   "pax": "4", "bookingClass": "j", "fareOnly": False})
+        self.assertEqual((r_opt["pax"], r_opt["bookingClass"], r_opt["fareOnly"]), (4, "J", False))
+        with self.assertRaises(ValueError):
+            c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
+                               "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": "2027-10-31", "pax": "0"})
+        with self.assertRaises(ValueError):
+            c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
+                               "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": "2027-10-31", "bookingClass": "YM"})
         r2 = c.normalize_route({"routeGroup": "icn-dad_pm", "region": "다낭", "origin": "ICN", "destination": "DAD",
                                 "airline": "KE", "depFlight": "KE457", "retFlight": "KE458", "days": "3", "endDate": "2027-10-31"})
         self.assertEqual(r2["routeGroup"], "ICN-DAD_PM")
@@ -298,6 +422,88 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(len(grouped["ICN-DAD_PM"]), 1)
         with self.assertRaises(ValueError):
             c.normalize_route({"region": "x", "days": ""})
+
+    def test_routes_csv_export_and_import(self):
+        routes = [
+            c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE", "depFlight": "KE843",
+                               "retFlight": "KE844", "days": "2,3", "endDate": "2027-10-31", "pax": 1, "bookingClass": "", "fareOnly": True}),
+            c.normalize_route({"routeGroup": "ICN-DAD_S", "origin": "ICN", "destination": "DAD", "airline": "KE", "depFlight": "KE457",
+                               "retFlight": "KE458", "days": "3", "endDate": "2027-10-31", "pax": 4, "bookingClass": "S", "fareOnly": False, "enabled": False}),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "routes.csv"
+            c.export_routes_csv(csv_path, routes)
+            self.assertTrue(csv_path.read_bytes().startswith(b"\xef\xbb\xbf"))  # UTF-8 BOM
+            loaded = c.import_routes_csv(csv_path)
+            self.assertEqual(loaded, routes)
+
+            # CP949 인코딩 + 엑셀 슬래시 날짜 + '최저가' 표기 불러오기 지원
+            cp949_path = Path(tmp) / "cp949.csv"
+            cp949_path.write_text(
+                "노선그룹,출발지,도착지,항공사,출국편,귀국편,항공일수,조회종료일,조회인원,조회클래스,운임기준,사용\n"
+                'ICN-TAO,ICN,TAO,KE,KE843,KE844,"2,3",2027/10/5,2,최저가,TOTAL KRW,사용\n',
+                encoding="cp949",
+            )
+            loaded2 = c.import_routes_csv(cp949_path)
+            self.assertEqual(len(loaded2), 1)
+            self.assertEqual((loaded2[0]["days"], loaded2[0]["endDate"], loaded2[0]["pax"], loaded2[0]["bookingClass"], loaded2[0]["fareOnly"]),
+                             ([2, 3], "2027-10-05", 2, "", False))
+
+            # CP949 + 탭(\t) 구분 CSV 불러오기 지원
+            tsv_path = Path(tmp) / "tab.csv"
+            tsv_path.write_text(
+                "노선그룹\t출발지\t도착지\t항공사\t출국편\t귀국편\t항공일수\t조회종료일\t조회인원\t조회클래스\t운임기준\t사용\n"
+                "ICN-CKG\tICN\tCKG\tCA\tCA440\tCA439\t3\t2027-10-31\t4\tY\tFARE KRW\t사용\n",
+                encoding="cp949",
+            )
+            loaded_tsv = c.import_routes_csv(tsv_path)
+            self.assertEqual(len(loaded_tsv), 1)
+            self.assertEqual((loaded_tsv[0]["routeGroup"], loaded_tsv[0]["pax"], loaded_tsv[0]["bookingClass"]), ("ICN-CKG", 4, "Y"))
+
+            # 잘못된 행은 행 번호와 함께 ValueError 발생
+            bad_path = Path(tmp) / "bad.csv"
+            bad_path.write_text("노선그룹,출발지,도착지,항공사,출국편,귀국편,항공일수,조회종료일,조회인원\nICN-TAO,ICN,TAO,KE,KE843,KE844,2,2027-10-31,99\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "2행 오류"):
+                c.import_routes_csv(bad_path)
+
+    def test_inline_row_edit_and_comboboxes(self):
+        import tkinter as tk
+        from tkinter import ttk
+        with tempfile.TemporaryDirectory() as tmp:
+            routes_path = Path(tmp) / "sabre-routes.json"
+            c.save_routes(routes_path, [
+                c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
+                                   "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": "2027-10-31"})
+            ])
+            orig_path = app_mod.ROUTES_PATH
+            app_mod.ROUTES_PATH = routes_path
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                gui = app_mod.App(root)
+                gui.start_row_edit("0", focus_col="pax")
+                self.assertIsNotNone(gui.edit_state)
+                self.assertIsInstance(gui.edit_state["widgets"]["fareOnly"], ttk.Combobox)
+                self.assertIsInstance(gui.edit_state["widgets"]["enabled"], ttk.Combobox)
+                self.assertIsInstance(gui.edit_state["widgets"]["pax"], ttk.Entry)
+                gui.edit_state["vars"]["pax"].set("4")
+                gui.edit_state["vars"]["bookingClass"].set("S")
+                gui.edit_state["vars"]["fareOnly"].set("TOTAL KRW")
+                gui.edit_state["vars"]["enabled"].set("중지")
+                self.assertTrue(gui.commit_row_edit())
+                self.assertIsNone(gui.edit_state)
+                saved = c.load_routes(routes_path)
+                self.assertEqual((saved[0]["pax"], saved[0]["bookingClass"], saved[0]["fareOnly"], saved[0]["enabled"]),
+                                 (4, "S", False, False))
+                # 노선 추가 후 Esc 취소 시 임시 행이 제거되고 목록은 변하지 않아야 한다
+                gui.add_route_row()
+                self.assertTrue(gui.tree.exists("new"))
+                gui.cancel_row_edit()
+                self.assertFalse(gui.tree.exists("new"))
+                self.assertEqual(len(gui.routes), 1)
+            finally:
+                app_mod.ROUTES_PATH = orig_path
+                root.destroy()
 
     def test_cli_select_jobs_and_summary(self):
         routes = c.load_routes(Path(__file__).resolve().parent / "sabre-routes.json")
@@ -317,6 +523,96 @@ class CoreTest(unittest.TestCase):
             c.verify_workbook(p, "B", date(2026, 12, 1), date(2026, 12, 2))
             with self.assertRaises(ValueError):
                 c.verify_workbook(p, "B", date(2026, 12, 1), date(2026, 12, 3))
+
+    def test_login_config_remember_and_clear(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = Path(tmp) / "sabre-config.json"
+            self.assertFalse(app_mod.has_saved_login(app_mod.read_config(cfg_path)))
+            # remember 키가 없는 기존 설정은 첫 실행 시 팝업을 띄우도록 False 판정
+            cfg_path.write_text('{"agentId":"u1","password":"p1","pcc":"R4D8"}', encoding="utf-8")
+            self.assertFalse(app_mod.has_saved_login(app_mod.read_config(cfg_path)))
+            # 로그인 정보 기억하기 저장 후 2회차부터 True
+            app_mod.save_login_config({"agentId": " u1 ", "password": "p1", "pcc": "r4d8"}, cfg_path)
+            saved = app_mod.read_config(cfg_path)
+            self.assertTrue(app_mod.has_saved_login(saved))
+            self.assertEqual((saved["agentId"], saved["pcc"], saved["remember"]), ("u1", "R4D8", True))
+            # 인증 실패 등으로 기억 해제 시 비밀번호와 remember 초기화
+            app_mod.clear_remembered_login(cfg_path)
+            cleared = app_mod.read_config(cfg_path)
+            self.assertFalse(app_mod.has_saved_login(cleared))
+            self.assertEqual(cleared["password"], "")
+            self.assertEqual(cleared["pcc"], "R4D8")
+
+    def test_login_dialog_flow_first_and_second_run(self):
+        import tkinter as tk
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = Path(tmp) / "sabre-config.json"
+            orig_cfg, orig_dlg, orig_launch = app_mod.CONFIG_PATH, app_mod.LoginDialog, t.launch_and_login
+            app_mod.CONFIG_PATH = cfg_path
+            launched, dialog_calls, next_result = [], 0, [None]
+
+            class FakeDialog:
+                def __init__(self, parent):
+                    nonlocal dialog_calls
+                    dialog_calls += 1
+                    self.result = next_result[0]
+
+            def fake_launch(cfg, log, stop):
+                launched.append(dict(cfg))
+                return True
+
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                gui = app_mod.App(root)
+                root.wait_window = lambda _w: None
+                app_mod.LoginDialog = FakeDialog
+                t.launch_and_login = fake_launch
+
+                # 1) 팝업 취소 시 브라우저 연결 안 함
+                next_result[0] = None
+                gui.login()
+                self.assertEqual(dialog_calls, 1)
+                self.assertEqual(launched, [])
+
+                # 2) 기억하기 체크 해제 로그인 -> 파일 저장 없이 세션 메모리로 연결
+                next_result[0] = {"agentId": "A1", "password": "PW1", "pcc": "R4D8", "remember": False}
+                gui.login()
+                root.update()
+                import time
+                for _ in range(30):
+                    if launched:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(dialog_calls, 2)
+                self.assertEqual(len(launched), 1)
+                self.assertEqual(launched[0]["agentId"], "A1")
+                self.assertFalse(cfg_path.exists())
+                self.assertEqual(gui.load_cfg()["agentId"], "A1")
+
+                # 3) 기억하기 체크 로그인 -> sabre-config.json 저장 후 연결
+                next_result[0] = {"agentId": "A2", "password": "PW2", "pcc": "R4D8", "remember": True}
+                gui.login()
+                for _ in range(30):
+                    if len(launched) >= 2:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(dialog_calls, 3)
+                self.assertEqual(len(launched), 2)
+                self.assertTrue(app_mod.has_saved_login(app_mod.read_config(cfg_path)))
+
+                # 4) 2회차 클릭 -> 팝업 없이 즉시 브라우저 연결
+                gui.login()
+                for _ in range(30):
+                    if len(launched) >= 3:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(dialog_calls, 3)  # 팝업 추가 호출 없음
+                self.assertEqual(len(launched), 3)
+                self.assertEqual(launched[2]["agentId"], "A2")
+            finally:
+                app_mod.CONFIG_PATH, app_mod.LoginDialog, t.launch_and_login = orig_cfg, orig_dlg, orig_launch
+                root.destroy()
 
 
 if __name__ == "__main__":

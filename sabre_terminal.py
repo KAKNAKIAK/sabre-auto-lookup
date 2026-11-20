@@ -21,7 +21,8 @@ LOGIN_URL = ("https://accounts.havail.sabre.com/login/agent?goto=https%3A%2F%2Fs
 PUSH_RESEND_INTERVAL = 300.0  # Okta 푸시 실패/만료 시 5분 간격 재전송
 MAX_PUSH_RESENDS = 5
 SESSION_EXPIRY_RE = re.compile(r"SESSION\s+EXPIRED|TIMED\s+OUT|SIGN\s+IN\s+AGAIN|NOT\s+SIGNED\s+IN|RE-?AUTH|INVALID_CREDENTIALS|세션.*만료", re.I)
-FARE_PRESENT_RE = re.compile(r"(?:1-|(?:^|\n)\s*FARE)\s*KRW\s*[\d,]+", re.I)
+FARE_PRESENT_RE = re.compile(r"(?:\b\d+-|(?:^|\n)\s*(?:FARE|TOTAL))\s*KRW\s*[\d,]+", re.I)
+LONG_SELL_FAIL_RE = re.compile(r"\b(?:UC|UN|LL|HL|NO)\b|UNABLE|RESTRICTED|DOES NOT OPERATE|CHECK|FORMAT", re.I)
 CHROME_PATHS = (Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
                 Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"))
 
@@ -119,6 +120,8 @@ class Terminal(Page):
             raise SessionExpired("Sabre 작업창이 없거나 로그아웃 상태입니다.")
         term = cls(target)
         term.mode = "CDP"
+        term.long_sell = True
+        term._ls_fallbacks = 0
         # S02 Error(line address) 모달은 X로 닫으면 호스트 세션이 비활성화되므로 Next -> Finish로 해제한다.
         for _ in range(6):
             if not term.eval(S02_MODAL_JS):
@@ -292,9 +295,38 @@ def find_flight(term: Terminal, command: str, airline: str, number: int, day: st
     return None
 
 
-def query_once(term: Terminal, route: dict, days: int, dep: date, settle: float) -> int | str:
+def _price_itinerary(term: Terminal, airline: str, org: str, dst: str, out_no: int, ret_no: int,
+                     d1: str, d2: str, pax: int, fare_only: bool, settle: float) -> int | str:
+    text = term.cmd("WPNCB", settle=settle)
+    if "NO LOWER FARE" in text.upper() and not FARE_PRESENT_RE.search(text):
+        text = term.cmd("WP", settle=settle)
+    return c.parse_wpncb(text, airline, org, dst, out_no, ret_no, d1, d2, pax=pax, fare_only=fare_only)
+
+
+def _query_long_sell(term: Terminal, route: dict, days: int, dep: date, settle: float) -> int | str:
+    """가용조회 2회를 생략하고 I -> 0출국NN§0귀국NN -> WPNCB 3단계로 고속 조회한다."""
     airline, org, dst = route["airline"], route["origin"], route["destination"]
     out_no, ret_no = c.flight_no(route["depFlight"], airline), c.flight_no(route["retFlight"], airline)
+    pax, req_cls, fare_only = c.route_pax(route), c.route_class(route), c.route_fare_only(route)
+    cls = req_cls or "Y"
+    d1, d2 = c.ddmmm(dep), c.ddmmm(dep + timedelta(days))
+    if "IGD" not in term.cmd("I", settle=settle):
+        return c.ERR
+    ch = term.cmd(
+        f"0{airline}{out_no}{cls}{d1}{org}{dst}NN{pax}§0{airline}{ret_no}{cls}{d2}{dst}{org}NN{pax}",
+        settle=settle,
+    )
+    if not ch.strip() or LONG_SELL_FAIL_RE.search(ch):
+        return c.ERR
+    res = _price_itinerary(term, airline, org, dst, out_no, ret_no, d1, d2, pax, fare_only, settle)
+    # 정상 운임(int)일 때만 확정하고 마감/오류는 가용조회 폴백으로 정확히 재확인한다.
+    return res if isinstance(res, int) else c.ERR
+
+
+def _query_via_avail(term: Terminal, route: dict, days: int, dep: date, settle: float) -> int | str:
+    airline, org, dst = route["airline"], route["origin"], route["destination"]
+    out_no, ret_no = c.flight_no(route["depFlight"], airline), c.flight_no(route["retFlight"], airline)
+    pax, req_cls, fare_only = c.route_pax(route), c.route_class(route), c.route_fare_only(route)
     ret = dep + timedelta(days)
     if "IGD" not in term.cmd("I", settle=settle):
         return c.ERR
@@ -302,16 +334,31 @@ def query_once(term: Terminal, route: dict, days: int, dep: date, settle: float)
         row = find_flight(term, f"1{c.ddmmm(d)}{frm}{to}¥{airline}", airline, no, c.ddmmm(d), settle)
         if row is None:
             return c.ERR
-        cls = c.open_class(row["classes"])
-        if cls is None:  # 이코노미 전석 마감이면 세그를 잡지 않고 바로 마감
+        cls = (req_cls if row["classes"].get(req_cls, 0) >= pax else None) if req_cls else c.open_class(row["classes"], pax=pax)
+        if cls is None:  # 요청 클래스(또는 이코노미) 잔여석 부족이면 세그를 잡지 않고 바로 마감
             return c.SOLD
-        state = c.sell_state(term.cmd(f"01{cls}{row['line']}", settle=settle), airline, no, c.ddmmm(d))
+        state = c.sell_state(term.cmd(f"0{pax}{cls}{row['line']}", settle=settle), airline, no, c.ddmmm(d), pax=pax)
         if state != "ok":
             return c.SOLD if state == "sold" else c.ERR
-    text = term.cmd("WPNCB", settle=settle)
-    if "NO LOWER FARE" in text.upper() and not FARE_PRESENT_RE.search(text):
-        text = term.cmd("WP", settle=settle)
-    return c.parse_wpncb(text, airline, org, dst, out_no, ret_no, c.ddmmm(dep), c.ddmmm(ret))
+    return _price_itinerary(term, airline, org, dst, out_no, ret_no, c.ddmmm(dep), c.ddmmm(ret), pax, fare_only, settle)
+
+
+def query_once(term: Terminal, route: dict, days: int, dep: date, settle: float,
+               use_long_sell: bool | None = None) -> int | str:
+    try_ls = getattr(term, "long_sell", True) if use_long_sell is None else use_long_sell
+    if try_ls:
+        fast = _query_long_sell(term, route, days, dep, settle)
+        if isinstance(fast, int):
+            term._ls_fallbacks = 0
+            return fast
+    res = _query_via_avail(term, route, days, dep, settle)
+    if try_ls and isinstance(res, int):
+        # Long Sell은 거절됐는데 가용조회 Short Sell은 성공한 경우가 연속 2회면 해당 작업 동안 Long Sell을 끈다.
+        fallbacks = getattr(term, "_ls_fallbacks", 0) + 1
+        term._ls_fallbacks = fallbacks
+        if fallbacks >= 2:
+            term.long_sell = False
+    return res
 
 
 def query_date(term: Terminal, route: dict, days: int, dep: date) -> int | str:

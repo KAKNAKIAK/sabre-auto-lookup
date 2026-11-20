@@ -43,10 +43,10 @@ def select_jobs(routes: list[dict], *, groups: list[str] | None = None, regions:
     for route in routes:
         if not route.get("enabled", True):
             continue
-        rg = str(route.get("routeGroup") or f"{route['origin']}-{route['destination']}").upper()
+        rg = c.route_group(route)
         if g_set and rg not in g_set:
             continue
-        if r_set and route["region"] not in r_set:
+        if r_set and c.route_region(route) not in r_set:
             continue
         if a_set and route["airline"].upper() not in a_set:
             continue
@@ -121,8 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     t0, today = time.monotonic(), date.today()
     completed, failed = [], []
     for route, days in jobs:
-        rg = str(route.get("routeGroup") or f"{route['origin']}-{route['destination']}")
-        name = f"{rg} {route['region']} {route['airline']} +{days}"
+        rg = c.route_group(route)
+        name = f"{rg} {c.route_region(route)} {route['airline']} +{days}"
         end = end_override or date.fromisoformat(route["endDate"])
         if end < start:
             failed.append({"job": name, "reason": f"종료일({end})이 시작일({start})보다 빠릅니다."})

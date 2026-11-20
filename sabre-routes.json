@@ -9,10 +9,13 @@
       "airline": "CA",
       "depFlight": "CA440",
       "retFlight": "CA439",
+      "endDate": "2027-10-31",
       "days": [
         3
       ],
-      "endDate": "2027-10-31",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -23,10 +26,13 @@
       "airline": "KE",
       "depFlight": "KE677",
       "retFlight": "KE678",
+      "endDate": "2027-10-31",
       "days": [
         3
       ],
-      "endDate": "2027-10-31",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -37,10 +43,13 @@
       "airline": "KE",
       "depFlight": "KE683",
       "retFlight": "KE684",
+      "endDate": "2027-03-24",
       "days": [
         4
       ],
-      "endDate": "2027-03-24",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -51,10 +60,13 @@
       "airline": "KE",
       "depFlight": "KE415",
       "retFlight": "KE416",
+      "endDate": "2027-10-31",
       "days": [
         3
       ],
-      "endDate": "2027-10-31",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -65,11 +77,14 @@
       "airline": "KE",
       "depFlight": "KE843",
       "retFlight": "KE844",
+      "endDate": "2027-10-31",
       "days": [
         2,
         3
       ],
-      "endDate": "2027-10-31",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -80,10 +95,13 @@
       "airline": "KE",
       "depFlight": "KE457",
       "retFlight": "KE458",
+      "endDate": "2027-10-31",
       "days": [
         3
       ],
-      "endDate": "2027-10-31",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -94,10 +112,13 @@
       "airline": "KE",
       "depFlight": "KE467",
       "retFlight": "KE468",
+      "endDate": "2027-10-27",
       "days": [
         4
       ],
-      "endDate": "2027-10-27",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -108,10 +129,13 @@
       "airline": "VJ",
       "depFlight": "VJ979",
       "retFlight": "VJ978",
+      "endDate": "2027-10-31",
       "days": [
         3
       ],
-      "endDate": "2027-10-31",
+      "pax": 4,
+      "bookingClass": "T",
+      "fareOnly": false,
       "enabled": true
     },
     {
@@ -122,10 +146,13 @@
       "airline": "KE",
       "depFlight": "KE445",
       "retFlight": "KE450",
+      "endDate": "2027-10-31",
       "days": [
         3
       ],
-      "endDate": "2027-10-31",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -136,10 +163,13 @@
       "airline": "KE",
       "depFlight": "KE471",
       "retFlight": "KE478",
+      "endDate": "2027-10-31",
       "days": [
         4
       ],
-      "endDate": "2027-10-31",
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     }
   ]

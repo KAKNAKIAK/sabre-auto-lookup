@@ -1,5 +1,6 @@
 {
   "agentId": "",
   "password": "",
-  "pcc": "R4D8"
+  "pcc": "",
+  "remember": false
 }

@@ -9,12 +9,14 @@
 2. 코드 수정이나 조회 전 `python -X utf8 -m unittest -v test_sabre_core`와 `python -X utf8 sabre_cli.py --list`로 현재 기준 상태를 확인합니다.
 3. `backup_*` 폴더는 과거 스냅샷이므로 수정하지 않습니다.
 
-## 1. 에이전트 기본 실행 경로 (CLI 우선)
+## 1. 에이전트 실행 규칙 (CLI 제어 필수, Computer Use 금지)
 
-- Sabre 운임 조회를 수행할 때는 브라우저 화면에 명령어를 직접 타이핑하지 말고 **`sabre_cli.py`를 호출**합니다.
+- AI 에이전트가 이 프로그램을 제어할 때는 **Computer Use(GUI 마우스 클릭·키보드 입력·화면 조작)로 `sabre_app.py`나 브라우저를 다루지 말고 반드시 `sabre_cli.py` CLI를 호출**합니다.
+- `sabre_app.py` 및 `세이버자동조회_실행.vbs`는 사용자 직접 실행용이며, GUI 수정 검증처럼 명시적 요청이 없는 한 AI는 CLI 경로(`--list`, `--login`, `--group`, `--region`, `--all`)만 사용합니다.
 - 실행 전 반드시 목록을 먼저 확인해 정확한 `routeGroup` / `region` / `days`를 사용합니다.
   ```powershell
   python -X utf8 sabre_cli.py --list
+  python -X utf8 sabre_cli.py --login
   python -X utf8 sabre_cli.py --group ICN-TAO --days 2 --start 2026-12-01 --end 2026-12-31
   ```
 - `sabre_cli.py`는 진행 로그를 `stderr`, 최종 결과 요약을 `stdout` JSON(`ok`, `elapsedSec`, `completed`, `failed`)으로 출력하며 종료 코드 `0`(성공) / `1`(실패)을 반환합니다.
