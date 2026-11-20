@@ -486,6 +486,11 @@ class CoreTest(unittest.TestCase):
                 self.assertIsInstance(gui.edit_state["widgets"]["fareOnly"], ttk.Combobox)
                 self.assertIsInstance(gui.edit_state["widgets"]["enabled"], ttk.Combobox)
                 self.assertIsInstance(gui.edit_state["widgets"]["pax"], ttk.Entry)
+                rg_entry = gui.edit_state["widgets"]["routeGroup"]
+                self.assertEqual(gui._move_entry_cursor(rg_entry, tk.END), "break")
+                self.assertEqual(rg_entry.index(tk.INSERT), len(rg_entry.get()))
+                self.assertEqual(gui._move_entry_cursor(rg_entry, 0), "break")
+                self.assertEqual(rg_entry.index(tk.INSERT), 0)
                 gui.edit_state["vars"]["pax"].set("4")
                 gui.edit_state["vars"]["bookingClass"].set("S")
                 gui.edit_state["vars"]["fareOnly"].set("TOTAL KRW")
@@ -501,6 +506,87 @@ class CoreTest(unittest.TestCase):
                 gui.cancel_row_edit()
                 self.assertFalse(gui.tree.exists("new"))
                 self.assertEqual(len(gui.routes), 1)
+                # 노선 복사 시 선택 행 바로 아래에 복제되고 선택·포커스가 복사 행으로 이동해야 한다
+                gui.tree.selection_set("0")
+                gui.copy_route_row()
+                self.assertEqual(len(gui.routes), 2)
+                self.assertEqual(gui.tree.selection(), ("1",))
+                self.assertEqual(gui.tree.focus(), "1")
+                self.assertEqual(gui.routes[1], gui.routes[0])
+                self.assertIsNot(gui.routes[1]["days"], gui.routes[0]["days"])
+                # 우클릭 메뉴: 빈칸 -> 노선 추가, 기존 행 -> 해당 행 선택 + 노선 복사/노선 삭제
+                m_blank = gui._build_tree_menu("")
+                self.assertEqual([m_blank.entrycget(i, "label") for i in range(m_blank.index("end") + 1)], ["노선 추가"])
+                m_row = gui._build_tree_menu("0")
+                self.assertEqual(gui.tree.selection(), ("0",))
+                self.assertEqual([m_row.entrycget(i, "label") for i in range(m_row.index("end") + 1)], ["노선 복사", "노선 삭제"])
+                # 빈 신규 노선 행에서 입력 없이 나가면 경고 후 삭제
+                warned = []
+                orig_warn = app_mod.messagebox.showwarning
+                app_mod.messagebox.showwarning = lambda title, msg, **_kw: warned.append((title, msg))
+                try:
+                    gui.add_route_row()
+                    self.assertTrue(gui.tree.exists("new"))
+                    self.assertEqual(
+                        (gui.edit_state["vars"]["pax"].get(), gui.edit_state["vars"]["bookingClass"].get(),
+                         gui.edit_state["vars"]["fareOnly"].get(), gui.edit_state["vars"]["enabled"].get()),
+                        ("4", "Y", "FARE KRW", "사용"),
+                    )
+                    self.assertTrue(gui.commit_row_edit())
+                    self.assertEqual(len(warned), 1)
+                    self.assertFalse(gui.tree.exists("new"))
+                    self.assertEqual(len(gui.routes), 2)
+                finally:
+                    app_mod.messagebox.showwarning = orig_warn
+                # 부분 입력 노선 행은 저장되지만 자동조회(group_routes/job_entries/CLI)에는 노출되지 않음
+                gui.add_route_row()
+                gui.edit_state["vars"]["origin"].set("ICN")
+                gui.edit_state["vars"]["airline"].set("KE")
+                self.assertTrue(gui.commit_row_edit())
+                self.assertEqual(len(gui.routes), 3)
+                self.assertFalse(c.is_complete_route(gui.routes[2]))
+                self.assertEqual(gui.job_entries, [])  # 0·1번은 중지, 2번은 미완성
+                self.assertEqual(cli.select_jobs(gui.routes, select_all=True), [])
+                # 나머지 필수 필드를 모두 채우면 즉시 자동조회에 노출됨
+                gui.start_row_edit("2", focus_col="destination")
+                gui.edit_state["vars"]["destination"].set("DAD")
+                gui.edit_state["vars"]["depFlight"].set("KE457")
+                gui.edit_state["vars"]["retFlight"].set("KE458")
+                gui.edit_state["vars"]["days"].set("2,3")
+                gui.edit_state["vars"]["endDate"].set("2027-10-31")
+                self.assertTrue(gui.commit_row_edit())
+                self.assertTrue(c.is_complete_route(gui.routes[2]))
+                self.assertEqual(len(gui.job_entries), 2)
+                # 개별 노선 체크박스는 그룹 미선택 상태에서도 항상 선택 가능하고, 단일 토글 버튼이 전체선택/전체해제로 전환됨
+                g0, v0, cb0, _, _ = gui.job_entries[0]
+                _, v1, _, _, _ = gui.job_entries[1]
+                self.assertEqual(str(cb0.cget("state")), "normal")
+                self.assertEqual(gui.group_toggle_vars[g0].get(), "전체선택")
+                v0.set(True)
+                gui.update_detail_states()
+                self.assertFalse(v1.get())
+                self.assertEqual(gui.group_toggle_vars[g0].get(), "전체해제")
+                self.assertEqual(len(gui.selected_jobs()), 1)
+                gui.toggle_group_jobs(g0)
+                self.assertFalse(v0.get())
+                self.assertFalse(v1.get())
+                self.assertEqual(gui.group_toggle_vars[g0].get(), "전체선택")
+                self.assertEqual(gui.selected_jobs(), [])
+                # 노선 검색: 노선그룹~귀국편 유연 검색 및 필터 상태에서도 원본 인덱스 유지
+                gui.manage_search_var.set("KE 458")
+                self.assertEqual(gui.tree.get_children(), ("2",))
+                gui.manage_search_var.set("icndad")
+                self.assertEqual(gui.tree.get_children(), ("2",))
+                gui.manage_search_var.set("tao")
+                self.assertEqual(gui.tree.get_children(), ("0", "1"))
+                gui.manage_search_var.set("")
+                self.assertEqual(gui.tree.get_children(), ("0", "1", "2"))
+                # F2 키로 선택 행 인라인 편집 진입
+                gui.tree.selection_set("2")
+                self.assertEqual(gui.on_tree_f2(), "break")
+                self.assertIsNotNone(gui.edit_state)
+                self.assertEqual(gui.edit_state["iid"], "2")
+                gui.cancel_row_edit()
             finally:
                 app_mod.ROUTES_PATH = orig_path
                 root.destroy()

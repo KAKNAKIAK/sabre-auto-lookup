@@ -41,7 +41,7 @@ def select_jobs(routes: list[dict], *, groups: list[str] | None = None, regions:
         return []
     jobs: list[tuple[dict, int]] = []
     for route in routes:
-        if not route.get("enabled", True):
+        if not route.get("enabled", True) or not c.is_complete_route(route):
             continue
         rg = c.route_group(route)
         if g_set and rg not in g_set:
@@ -94,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.list:
         grouped = c.group_routes(routes)
-        _emit({"ok": True, "groups": list(grouped.keys()), "routes": [r for r in routes if r.get("enabled", True)]})
+        _emit({"ok": True, "groups": list(grouped.keys()),
+               "routes": [r for r in routes if r.get("enabled", True) and c.is_complete_route(r)]})
         return 0
 
     cfg = load_config()

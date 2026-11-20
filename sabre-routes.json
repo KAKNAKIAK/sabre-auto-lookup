@@ -2,7 +2,7 @@
   "schema": "sabre-routes-v1",
   "routes": [
     {
-      "routeGroup": "ICN-CKG",
+      "routeGroup": "ICN-CKG-CA",
       "region": "중경",
       "origin": "ICN",
       "destination": "CKG",
@@ -19,7 +19,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-HKT",
+      "routeGroup": "ICN-HKT-KE",
       "region": "푸켓",
       "origin": "ICN",
       "destination": "HKT",
@@ -36,7 +36,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-CNX",
+      "routeGroup": "ICN-CNX-KE",
       "region": "치앙마이",
       "origin": "ICN",
       "destination": "CNX",

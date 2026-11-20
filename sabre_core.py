@@ -23,7 +23,12 @@ DEST_REGION = {"CKG": "중경", "HKT": "푸켓", "CNX": "치앙마이", "GUM": "
 
 
 def route_group(route: dict) -> str:
-    return str(route.get("routeGroup") or f"{route['origin']}-{route['destination']}").strip().upper()
+    rg = str(route.get("routeGroup") or "").strip().upper()
+    if rg:
+        return rg
+    org = str(route.get("origin") or "").strip().upper()
+    dst = str(route.get("destination") or "").strip().upper()
+    return f"{org}-{dst}" if (org and dst) else ""
 
 
 def route_region(route: dict) -> str:
@@ -325,15 +330,29 @@ def import_routes_csv(path: Path) -> list[dict]:
     return routes
 
 
-def normalize_route(form: dict) -> dict:
+def is_complete_route(route: dict) -> bool:
+    keys = ("origin", "destination", "airline", "depFlight", "retFlight", "endDate")
+    if not all(str(route.get(k) or "").strip() for k in keys):
+        return False
+    if not route.get("days"):
+        return False
+    try:
+        date.fromisoformat(str(route["endDate"]).strip())
+    except ValueError:
+        return False
+    return True
+
+
+def normalize_route(form: dict, *, allow_partial: bool = False) -> dict:
     days = sorted({int(x) for x in re.findall(r"\d+", str(form.get("days", "")))})
     keys = ("origin", "destination", "airline", "depFlight", "retFlight", "endDate")
     route = {k: str(form.get(k, "")).strip() for k in keys}
     for k in ("origin", "destination", "airline", "depFlight", "retFlight"):
         route[k] = route[k].upper()
-    if not all(route.values()) or not days:
+    if not allow_partial and (not all(route.values()) or not days):
         raise ValueError("모든 칸을 입력하세요. 항공일수는 2,3 처럼 쉼표로 여러 개 입력합니다.")
-    date.fromisoformat(route["endDate"])
+    if route["endDate"]:
+        date.fromisoformat(route["endDate"])
     pax_raw = str(form.get("pax", "1")).strip() or "1"
     if not pax_raw.isdigit() or not (1 <= int(pax_raw) <= 9):
         raise ValueError("조회인원은 1~9 사이의 숫자로 입력하세요.")
@@ -342,7 +361,7 @@ def normalize_route(form: dict) -> dict:
     booking_class = "" if raw_cls in ("최저가", "자동") else raw_cls.upper()
     if booking_class and not re.fullmatch(r"[A-Z]", booking_class):
         raise ValueError("조회클래스는 영문 1글자(예: Y, M, Q) 또는 빈칸으로 입력하세요.")
-    group = str(form.get("routeGroup") or "").strip().upper() or f"{route['origin']}-{route['destination']}"
+    group = route_group({**route, "routeGroup": form.get("routeGroup", "")})
     region = str(form.get("region") or "").strip() or DEST_REGION.get(route["destination"], route["destination"])
     return {
         "routeGroup": group,
@@ -357,10 +376,10 @@ def normalize_route(form: dict) -> dict:
 
 
 def group_routes(routes: list[dict]) -> dict[str, list[dict]]:
-    """사용 중인 노선을 노선그룹(routeGroup) 단위로 묶어 순서대로 반환한다."""
+    """사용 중이면서 모든 필수 항목이 채워진 노선만 노선그룹 단위로 묶어 반환한다."""
     grouped: dict[str, list[dict]] = {}
     for r in routes:
-        if not r.get("enabled", True):
+        if not r.get("enabled", True) or not is_complete_route(r):
             continue
         grouped.setdefault(route_group(r), []).append(r)
     return grouped
