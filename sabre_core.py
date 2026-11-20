@@ -8,6 +8,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 OUTPUT_ROOT = Path(r"G:\내 드라이브\안티그래비티\workspace\04. 요금조회\01. 항공")
 MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
@@ -177,9 +179,102 @@ def parse_wpncb(text: str, airline: str, origin: str, dest: str, out_no: int = 0
     return ERR
 
 
-def output_path(route: dict, days: int, today: date) -> Path:
+def output_path(route: dict, days: int, today: date, root: Path | str | None = None) -> Path:
     name = f"{today:%Y%m%d} 조회_{route['origin']}{route['destination']}_{route['airline']}_플러스{days}.xlsx"
-    return OUTPUT_ROOT / route_region(route) / name
+    base = Path(str(root).strip()) if str(root or "").strip() else OUTPUT_ROOT
+    return base / route_region(route) / name
+
+
+def group_summary_path(group: str, region: str, today: date, root: Path | str | None = None) -> Path:
+    safe_group = re.sub(r'[\\/:*?"<>|]+', '-', group.strip()) or 'GROUP'
+    base = Path(str(root).strip()) if str(root or '').strip() else OUTPUT_ROOT
+    return base / region / f'{today:%Y%m%d} 조회_{safe_group}_최저가통합.xlsx'
+
+
+def save_group_summary_workbook(path: Path, group: str, entries: list[tuple[dict, int, Path]]) -> Path:
+    """한 노선그룹의 편명별 조회 엑셀을 모아 날짜별 최저가·최저가 항공 수식 시트로 저장한다."""
+    if not entries:
+        raise ValueError('통합할 조회 결과가 없습니다.')
+    dep_counts: dict[str, int] = {}
+    for route, _days, _p in entries:
+        dep_counts[route['depFlight']] = dep_counts.get(route['depFlight'], 0) + 1
+    col_labels: list[str] = []
+    col_maps: list[dict[date, int | str]] = []
+    all_dates: set[date] = set()
+    for route, days, xlsx_path in entries:
+        dep = route['depFlight']
+        col_labels.append(f'{dep}(+{days})' if dep_counts[dep] > 1 else dep)
+        per_date: dict[date, int | str] = {}
+        wb_in = load_workbook(xlsx_path, read_only=True)
+        try:
+            ws_in = wb_in.active
+            for row in ws_in.iter_rows(min_row=2, values_only=True):
+                if not row or row[0] is None:
+                    continue
+                d_val = row[0].date() if hasattr(row[0], 'date') else date.fromisoformat(str(row[0]).strip())
+                per_date[d_val] = row[1]
+                all_dates.add(d_val)
+        finally:
+            wb_in.close()
+        col_maps.append(per_date)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = re.sub(r'[:\\/?*\[\]]', '-', group.strip())[:31] or 'Sheet1'
+
+    font_reg = Font(name='맑은 고딕', size=11)
+    font_bold = Font(name='맑은 고딕', size=11, bold=True)
+    align_c = Alignment(horizontal='center', vertical='center')
+    fill_hdr = PatternFill(fill_type='solid', start_color='FFC9DAF8', end_color='FFC9DAF8')
+    fill_sold = PatternFill(fill_type='solid', start_color='FFFCE4D6', end_color='FFFCE4D6')
+
+    n_cols = len(col_labels)
+    last_flight_col = 1 + n_cols
+    last_letter = get_column_letter(last_flight_col)
+    date_col = last_flight_col + 2
+    min_col = last_flight_col + 3
+    air_col = last_flight_col + 4
+    min_letter = get_column_letter(min_col)
+
+    for idx, label in enumerate(col_labels, start=2):
+        cell = ws.cell(2, idx, label)
+        cell.font, cell.alignment = font_bold, align_c
+    for col_idx, label in ((date_col, '날짜'), (min_col, '최저가'), (air_col, '최저가 항공')):
+        cell = ws.cell(2, col_idx, label)
+        cell.font, cell.alignment, cell.fill = font_bold, align_c, fill_hdr
+
+    for r_idx, d in enumerate(sorted(all_dates), start=3):
+        c_date = ws.cell(r_idx, 1, d)
+        c_date.font, c_date.alignment, c_date.number_format = font_reg, align_c, 'yyyy-mm-dd'
+        for offset, per_date in enumerate(col_maps):
+            val = per_date.get(d)
+            cell = ws.cell(r_idx, 2 + offset, val)
+            cell.font, cell.alignment = font_reg, align_c
+            if isinstance(val, int):
+                cell.number_format = '#,##0'
+            elif val == SOLD:
+                cell.fill = fill_sold
+        sc_date = ws.cell(r_idx, date_col, f'=A{r_idx}')
+        sc_date.font, sc_date.alignment, sc_date.number_format = font_reg, align_c, 'yyyy-mm-dd'
+        sc_min = ws.cell(r_idx, min_col, f'=IF(COUNT(B{r_idx}:{last_letter}{r_idx})=0,"{SOLD}",MIN(B{r_idx}:{last_letter}{r_idx}))')
+        sc_min.font, sc_min.alignment, sc_min.number_format = font_reg, align_c, '#,##0'
+        sc_air = ws.cell(
+            r_idx,
+            air_col,
+            f'=IF(ISNUMBER({min_letter}{r_idx}),IFERROR(INDEX($B$2:${last_letter}$2,1,MATCH({min_letter}{r_idx},B{r_idx}:{last_letter}{r_idx},0)),""),"")',
+        )
+        sc_air.font, sc_air.alignment = font_reg, align_c
+
+    ws.column_dimensions['A'].width = 13
+    for idx in range(2, last_flight_col + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 12
+    ws.column_dimensions[get_column_letter(last_flight_col + 1)].width = 4
+    ws.column_dimensions[get_column_letter(date_col)].width = 13
+    ws.column_dimensions[get_column_letter(min_col)].width = 12
+    ws.column_dimensions[get_column_letter(air_col)].width = 14
+    wb.save(path)
+    return path
 
 
 def basis_text(route: dict, days: int) -> str:

@@ -2,7 +2,7 @@
   "schema": "sabre-routes-v1",
   "routes": [
     {
-      "routeGroup": "ICN-CKG-CA",
+      "routeGroup": "ICN-CKG",
       "region": "중경",
       "origin": "ICN",
       "destination": "CKG",
@@ -53,7 +53,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-GUM",
+      "routeGroup": "ICN-GUM-KE",
       "region": "괌",
       "origin": "ICN",
       "destination": "GUM",
@@ -70,7 +70,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-TAO",
+      "routeGroup": "ICN-TAO-KE",
       "region": "칭다오",
       "origin": "ICN",
       "destination": "TAO",
@@ -88,7 +88,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-DAD",
+      "routeGroup": "ICN-DAD-KE",
       "region": "다낭",
       "origin": "ICN",
       "destination": "DAD",
@@ -105,7 +105,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-CXR",
+      "routeGroup": "ICN-CXR-KE",
       "region": "나트랑",
       "origin": "ICN",
       "destination": "CXR",
@@ -122,7 +122,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-PQC",
+      "routeGroup": "ICN-PQC-VJ",
       "region": "푸꾸옥",
       "origin": "ICN",
       "destination": "PQC",
@@ -139,7 +139,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-HAN",
+      "routeGroup": "ICN-HAN-KE",
       "region": "하노이",
       "origin": "ICN",
       "destination": "HAN",
@@ -156,7 +156,7 @@
       "enabled": true
     },
     {
-      "routeGroup": "ICN-SGN",
+      "routeGroup": "ICN-SGN-KE",
       "region": "호치민",
       "origin": "ICN",
       "destination": "SGN",
@@ -166,6 +166,74 @@
       "endDate": "2027-10-31",
       "days": [
         4
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-BKK-LCC",
+      "region": "BKK",
+      "origin": "ICN",
+      "destination": "BKK",
+      "airline": "LJ",
+      "depFlight": "LJ001",
+      "retFlight": "LJ002",
+      "endDate": "2027-02-26",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-BKK-LCC",
+      "region": "BKK",
+      "origin": "ICN",
+      "destination": "BKK",
+      "airline": "TW",
+      "depFlight": "TW101",
+      "retFlight": "TW102",
+      "endDate": "2027-03-25",
+      "days": [
+        4
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-BKK-LCC",
+      "region": "BKK",
+      "origin": "ICN",
+      "destination": "BKK",
+      "airline": "YP",
+      "depFlight": "YP601",
+      "retFlight": "YP602",
+      "endDate": "2027-10-26",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "ICN-BKK-LCC",
+      "region": "BKK",
+      "origin": "ICN",
+      "destination": "BKK",
+      "airline": "ZE",
+      "depFlight": "ZE511",
+      "retFlight": "ZE512",
+      "endDate": "2027-03-24",
+      "days": [
+        3
       ],
       "pax": 4,
       "bookingClass": "Y",

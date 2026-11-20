@@ -61,7 +61,7 @@ return 'WAIT'})()"""
 POPUP_JS = """(()=>{let n=0;document.querySelectorAll('[role=dialog],[role=alertdialog],.spark-modal')
 .forEach(d=>{if(d.classList.contains('s02-modal')||/S02\s+Error|line\s+address|session\s+expired|timed\s+out|sign\s+in|re-?auth|세션.*만료/i.test(d.innerText||''))return;
 d.querySelectorAll('button').forEach(b=>{const l=((b.getAttribute('aria-label')||'')+' '+(b.innerText||'')).trim();
-if(/^(x|×|close|닫기)$/i.test(l)||/close|닫기/i.test(b.getAttribute('aria-label')||'')){b.click();n++}})});return n})()"""
+if(/^(x|×|close|닫기)$/i.test(l)||/close|닫기/i.test(b.getAttribute('aria-label')||'')||(/팝업이\s*차단/i.test(d.innerText||'')&&/^확인$/.test((b.innerText||'').trim()))){b.click();n++}})});return n})()"""
 SESSION_EXPIRED_JS = """(()=>/session\s+expired|timed\s+out|sign\s+in\s+again|re-?auth|세션.*만료/i.test(
 (document.querySelector('[role=main],main')?.innerText||'')+' '+
 [...document.querySelectorAll('[role=dialog],[role=alertdialog],.spark-modal')].map(d=>d.innerText||'').join(' ')))()"""
@@ -408,7 +408,8 @@ def _connect_or_relogin(cfg: dict | None, log, stop: threading.Event, background
 
 def run_job(route: dict, days: int, start: date, end: date, today: date, log, stop: threading.Event,
             background: bool = True, cfg: dict | None = None) -> Path | None:
-    path, basis = c.output_path(route, days, today), c.basis_text(route, days)
+    path = c.output_path(route, days, today, root=(cfg or {}).get("outputRoot"))
+    basis = c.basis_text(route, days)
     term = _connect_or_relogin(cfg, log, stop, background, force_relogin=False)
     results: dict = {}
     dates = [start + timedelta(n) for n in range((end - start).days + 1)]
@@ -483,9 +484,23 @@ def launch_and_login(cfg: dict, log, stop: threading.Event, force_relogin: bool 
                 log("이미 로그인된 Sabre 작업창이 정상 응답합니다(I -> IGD).")
                 return True
             except SessionExpired as exc:
-                log(f"기존 Sabre 탭 세션 만료 감지({exc}) -> 자동 재로그인을 진행합니다.")
-                _navigate_to_login(existing_srw)
-                time.sleep(2.0)
+                # 로딩 중이거나 S02 대기 중인 정상 탭을 이탈시켜 beforeunload("사이트에서 나가시겠습니까?")를 유발하지 않도록
+                # 실제 세션 만료 배너/모달이 확인된 경우에만 로그인 URL로 이동한다.
+                is_expired = False
+                try:
+                    chk_page = Page(existing_srw)
+                    try:
+                        is_expired = bool(chk_page.eval(SESSION_EXPIRED_JS))
+                    finally:
+                        chk_page.close()
+                except Exception:
+                    is_expired = False
+                if is_expired:
+                    log(f"기존 Sabre 탭 세션 만료 감지({exc}) -> 자동 재로그인을 진행합니다.")
+                    _navigate_to_login(existing_srw)
+                    time.sleep(2.0)
+                else:
+                    log(f"기존 Sabre 작업창 준비 대기 중({exc})...")
         elif existing_srw and force_relogin:
             _navigate_to_login(existing_srw)
             time.sleep(2.0)
@@ -521,6 +536,7 @@ def launch_and_login(cfg: dict, log, stop: threading.Event, force_relogin: bool 
     filled = ever_connected = False
     push_resends = 0
     last_push_at: float | None = None
+    srw_wait_logged = False
     misses = 0
     # 최초 대기 + (최대 재전송 횟수 * 재전송 간격) + 로그인 페이지 로딩 여유 120초
     overall_deadline = time.monotonic() + push_resend_interval * (max_push_resends + 1) + 120
@@ -544,17 +560,26 @@ def launch_and_login(cfg: dict, log, stop: threading.Event, force_relogin: bool 
                 if page.eval(SESSION_EXPIRED_JS):
                     page.send("Page.navigate", {"url": LOGIN_URL})
                     filled = False
+                    srw_wait_logged = False
+                    continue
+                if page.eval(S02_MODAL_JS):
                     continue
                 if page.eval(FOCUS_JS):
                     time.sleep(2)
                     page.eval(POPUP_JS)
                     # 재로그인 직후 구탭 오인식을 막기 위해 I -> IGD 생존 확인까지 완료한다.
+                    # 단, 방금 로그인된 작업창이 아직 호스트 연결 중일 수 있으므로 로그인 페이지로 튕기지 않고 대기한다.
                     try:
                         check = Terminal.connect(prefer_api=False)
                         check.close()
                     except SessionExpired:
-                        page.send("Page.navigate", {"url": LOGIN_URL})
-                        filled = False
+                        if page.eval(SESSION_EXPIRED_JS):
+                            page.send("Page.navigate", {"url": LOGIN_URL})
+                            filled = False
+                            srw_wait_logged = False
+                        elif not srw_wait_logged:
+                            srw_wait_logged = True
+                            log("Sabre 작업창 호스트 연결을 기다리는 중입니다...")
                         continue
                     log("Sabre 로그인 완료.")
                     return True

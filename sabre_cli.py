@@ -121,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
 
     t0, today = time.monotonic(), date.today()
     completed, failed = [], []
+    grouped_done: dict[str, list[tuple[dict, int, Path]]] = {}
     for route, days in jobs:
         rg = c.route_group(route)
         name = f"{rg} {c.route_region(route)} {route['airline']} +{days}"
@@ -139,12 +140,24 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if path:
             completed.append({"job": name, **summarize_workbook(path)})
+            grouped_done.setdefault(rg, []).append((route, days, path))
         else:
             failed.append({"job": name, "reason": "중단됨"})
             break
 
+    group_summaries = []
+    for grp, entries in grouped_done.items():
+        if len(entries) >= 2:
+            sum_path = c.group_summary_path(grp, c.route_region(entries[0][0]), today, root=cfg.get("outputRoot"))
+            c.save_group_summary_workbook(sum_path, grp, entries)
+            group_summaries.append(str(sum_path))
+            log(f"그룹 최저가 통합 완료: {sum_path}")
+
     ok = bool(completed) and not failed
-    _emit({"ok": ok, "elapsedSec": round(time.monotonic() - t0, 1), "completed": completed, "failed": failed})
+    payload = {"ok": ok, "elapsedSec": round(time.monotonic() - t0, 1), "completed": completed, "failed": failed}
+    if group_summaries:
+        payload["groupSummaries"] = group_summaries
+    _emit(payload)
     return 0 if ok else 1
 
 
