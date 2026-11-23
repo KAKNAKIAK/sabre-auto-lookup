@@ -14,33 +14,28 @@
       --muted: #475569;
       --primary: #2563eb;
       --primary-soft: #eff6ff;
-      --accent: #f59e0b;
       --accent-soft: #fffbeb;
-      --success: #16a34a;
       --success-soft: #f0fdf4;
-      --danger: #dc2626;
-      --danger-soft: #fef2f2;
       --radius: 14px;
-      --shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+      --shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
     }
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      font-family: "Pretendard", "Malgun Gothic", "맑은 고딕", -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: "Pretendard", "Malgun Gothic", "맑은 고딕", -apple-system, sans-serif;
       background: var(--bg);
       color: var(--text);
-      line-height: 1.65;
+      line-height: 1.6;
     }
     .layout {
       display: grid;
-      grid-template-columns: 260px minmax(0, 1fr);
-      max-width: 1360px;
+      grid-template-columns: 230px minmax(0, 1fr);
+      max-width: 1240px;
       margin: 0 auto;
-      gap: 28px;
-      padding: 24px 24px 72px;
+      gap: 24px;
+      padding: 24px 20px 64px;
     }
-    /* Sidebar */
     .sidebar {
       position: sticky;
       top: 20px;
@@ -48,39 +43,21 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 20px 16px;
+      padding: 18px 14px;
       box-shadow: var(--shadow);
     }
     .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding-bottom: 16px;
+      gap: 10px;
+      padding-bottom: 14px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
-    .brand img {
-      width: 42px;
-      height: 42px;
-      border-radius: 10px;
-      flex-shrink: 0;
-    }
-    .brand-title {
-      font-size: 15px;
-      font-weight: 800;
-      line-height: 1.25;
-      color: var(--text);
-    }
-    .brand-sub {
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 2px;
-    }
-    .nav {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
+    .brand img { width: 38px; height: 38px; border-radius: 9px; }
+    .brand-title { font-size: 14px; font-weight: 800; line-height: 1.25; }
+    .brand-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+    .nav { display: flex; flex-direction: column; gap: 3px; }
     .nav a {
       text-decoration: none;
       color: var(--muted);
@@ -88,124 +65,71 @@
       font-weight: 600;
       padding: 8px 10px;
       border-radius: 8px;
-      transition: background 0.15s, color 0.15s;
     }
-    .nav a:hover {
-      background: var(--primary-soft);
-      color: var(--primary);
-    }
-    .nav-sep {
-      height: 1px;
-      background: var(--border);
-      margin: 10px 0;
-    }
+    .nav a:hover { background: var(--primary-soft); color: var(--primary); }
+    .nav-sep { height: 1px; background: var(--border); margin: 10px 0; }
     .repo-link {
       display: block;
       text-align: center;
       background: #0f172a;
-      color: #ffffff !important;
-      font-size: 13px;
-      padding: 9px 12px;
+      color: #ffffff;
+      font-size: 12.5px;
+      padding: 9px 10px;
       border-radius: 9px;
       text-decoration: none;
       font-weight: 700;
     }
     .repo-link:hover { background: #1e293b; }
 
-    /* Main content */
     main { min-width: 0; }
     .hero {
       background: linear-gradient(135deg, #fffbeb 0%, #eff6ff 100%);
       border: 1px solid #fde68a;
-      border-radius: 18px;
-      padding: 28px 30px;
-      margin-bottom: 24px;
+      border-radius: 16px;
+      padding: 24px 26px;
+      margin-bottom: 20px;
       box-shadow: var(--shadow);
     }
-    .hero-top {
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      flex-wrap: wrap;
-    }
-    .hero-top img {
-      width: 64px;
-      height: 64px;
-      border-radius: 16px;
-      box-shadow: 0 6px 18px rgba(245, 158, 11, 0.28);
-    }
-    .hero h1 {
-      margin: 0;
-      font-size: 26px;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-    }
-    .hero p {
-      margin: 6px 0 0;
-      color: var(--muted);
-      font-size: 15px;
-    }
-    .badges {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 14px;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12.5px;
-      font-weight: 700;
-      padding: 5px 11px;
-      border-radius: 999px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-    }
-    .badge.blue { background: var(--primary-soft); border-color: #bfdbfe; color: #1d4ed8; }
-    .badge.green { background: var(--success-soft); border-color: #bbf7d0; color: #15803d; }
-    .badge.amber { background: var(--accent-soft); border-color: #fde68a; color: #b45309; }
+    .hero-top { display: flex; align-items: center; gap: 16px; }
+    .hero-top img { width: 56px; height: 56px; border-radius: 14px; }
+    .hero h1 { margin: 0; font-size: 24px; font-weight: 800; }
+    .hero p { margin: 4px 0 0; color: var(--muted); font-size: 14.5px; }
 
-    .flow-grid {
+    .flow {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin-top: 20px;
+      gap: 10px;
+      margin-top: 18px;
     }
-    .flow-card {
-      background: rgba(255, 255, 255, 0.9);
+    .flow a {
+      background: rgba(255, 255, 255, 0.92);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 14px;
+      border-radius: 11px;
+      padding: 12px 13px;
+      text-decoration: none;
+      color: inherit;
+      transition: transform 0.15s, border-color 0.15s;
     }
-    .flow-step {
+    .flow a:hover { transform: translateY(-2px); border-color: #93c5fd; }
+    .step-tag {
       display: inline-block;
       font-size: 11px;
       font-weight: 800;
       color: #ffffff;
       background: var(--primary);
-      padding: 2px 8px;
+      padding: 1px 8px;
       border-radius: 999px;
-      margin-bottom: 6px;
+      margin-bottom: 5px;
     }
-    .flow-card h3 {
-      margin: 0 0 4px;
-      font-size: 14.5px;
-      font-weight: 800;
-    }
-    .flow-card p {
-      margin: 0;
-      font-size: 12.8px;
-      color: var(--muted);
-    }
+    .flow strong { display: block; font-size: 14px; margin-bottom: 2px; }
+    .flow span { font-size: 12.5px; color: var(--muted); }
 
     section.card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 26px 28px;
-      margin-bottom: 22px;
+      padding: 24px 26px;
+      margin-bottom: 18px;
       box-shadow: var(--shadow);
       scroll-margin-top: 20px;
     }
@@ -213,44 +137,62 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 14px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border);
+      margin-bottom: 10px;
     }
     .sec-num {
-      width: 28px;
-      height: 28px;
-      border-radius: 8px;
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
       background: var(--primary);
       color: #ffffff;
-      font-size: 14px;
+      font-size: 13.5px;
       font-weight: 800;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
     }
-    section.card h2 {
-      margin: 0;
-      font-size: 20px;
-      font-weight: 800;
-      letter-spacing: -0.01em;
+    section.card h2 { margin: 0; font-size: 19px; font-weight: 800; }
+    .lead { margin: 0 0 14px; color: var(--muted); font-size: 14.5px; }
+
+    .points {
+      list-style: none;
+      padding: 0;
+      margin: 12px 0 0;
+      display: grid;
+      gap: 8px;
     }
-    section.card h3 {
-      margin: 20px 0 8px;
-      font-size: 15.5px;
-      font-weight: 800;
-      color: #1e293b;
+    .points li {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
     }
-    p { margin: 8px 0; }
-    ul, ol {
-      margin: 8px 0 12px;
-      padding-left: 20px;
+    .points li strong { color: #0f172a; }
+
+    .tip {
+      margin-top: 12px;
+      padding: 11px 14px;
+      border-radius: 10px;
+      font-size: 13.5px;
+      background: var(--primary-soft);
+      border: 1px solid #bfdbfe;
+      color: #1e3a8a;
     }
-    li { margin: 5px 0; }
+    .tip.safe {
+      background: var(--success-soft);
+      border-color: #bbf7d0;
+      color: #166534;
+    }
+    .tip.warn {
+      background: var(--accent-soft);
+      border-color: #fde68a;
+      color: #92400e;
+    }
 
     .shot {
-      margin: 14px 0 18px;
+      margin: 14px 0;
       border: 1px solid var(--border);
       border-radius: 12px;
       overflow: hidden;
@@ -261,87 +203,49 @@
       width: 100%;
       height: auto;
       cursor: zoom-in;
-      transition: opacity 0.15s;
     }
-    .shot img:hover { opacity: 0.96; }
     .shot figcaption {
-      padding: 10px 14px;
-      font-size: 12.8px;
+      padding: 8px 12px;
+      font-size: 12.5px;
       color: var(--muted);
       background: #f8fafc;
       border-top: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      gap: 10px;
     }
     .shot-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
+      gap: 14px;
       align-items: start;
     }
-    .shot.compact img {
-      max-width: 440px;
-      margin: 0 auto;
-      padding: 10px;
-    }
-
-    .callout {
-      border-radius: 11px;
-      padding: 13px 16px;
-      margin: 14px 0;
-      font-size: 13.8px;
-      border: 1px solid transparent;
-    }
-    .callout strong { display: inline-block; margin-bottom: 2px; }
-    .callout.info { background: var(--primary-soft); border-color: #bfdbfe; color: #1e3a8a; }
-    .callout.warn { background: var(--accent-soft); border-color: #fde68a; color: #92400e; }
-    .callout.safe { background: var(--success-soft); border-color: #bbf7d0; color: #166534; }
-    .callout.danger { background: var(--danger-soft); border-color: #fecaca; color: #991b1b; }
+    .shot.compact img { max-width: 400px; margin: 0 auto; padding: 8px; }
 
     kbd {
       display: inline-block;
-      padding: 2px 7px;
+      padding: 1px 6px;
       font-size: 12px;
       font-weight: 700;
-      font-family: Consolas, "Courier New", monospace;
-      color: #0f172a;
+      font-family: Consolas, monospace;
       background: #f1f5f9;
       border: 1px solid #cbd5e1;
       border-bottom-width: 2px;
-      border-radius: 6px;
-    }
-    code {
-      font-family: Consolas, "Courier New", monospace;
-      font-size: 12.8px;
-      background: #f1f5f9;
-      padding: 2px 6px;
       border-radius: 5px;
-      color: #0f172a;
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
-      margin: 12px 0;
-      font-size: 13.8px;
+      margin-top: 10px;
+      font-size: 13.5px;
     }
     th, td {
       border: 1px solid var(--border);
-      padding: 9px 12px;
+      padding: 8px 12px;
       text-align: left;
-      vertical-align: top;
     }
-    th {
-      background: #f8fafc;
-      font-weight: 800;
-      color: #334155;
-      white-space: nowrap;
-    }
-    tr:nth-child(even) td { background: #fcfdff; }
+    th { background: #f8fafc; font-weight: 800; color: #334155; }
 
-    /* Lightbox */
     .lightbox {
       position: fixed;
       inset: 0;
@@ -354,26 +258,15 @@
       cursor: zoom-out;
     }
     .lightbox.open { display: flex; }
-    .lightbox img {
-      max-width: 96vw;
-      max-height: 92vh;
-      border-radius: 10px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-      background: #ffffff;
-    }
+    .lightbox img { max-width: 96vw; max-height: 92vh; border-radius: 10px; background: #fff; }
 
-    footer {
-      text-align: center;
-      color: var(--muted);
-      font-size: 12.5px;
-      margin-top: 24px;
-    }
+    footer { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 18px; }
 
-    @media (max-width: 980px) {
-      .layout { grid-template-columns: 1fr; padding: 14px 14px 48px; }
+    @media (max-width: 920px) {
+      .layout { grid-template-columns: 1fr; padding: 14px; }
       .sidebar { position: static; }
       .nav { flex-direction: row; flex-wrap: wrap; }
-      .flow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .shot-grid { grid-template-columns: 1fr; }
     }
   </style>
@@ -382,113 +275,114 @@
   <div class="layout">
     <aside class="sidebar">
       <div class="brand">
-        <img src="assets/sabre_icon.png" alt="항공운임 조회 아이콘" />
+        <img src="assets/sabre_icon.png" alt="아이콘" />
         <div>
           <div class="brand-title">항공운임 조회<br />(SABRE VER.)</div>
-          <div class="brand-sub">사용자 매뉴얼 · v1.0.0</div>
+          <div class="brand-sub">사용 안내</div>
         </div>
       </div>
       <nav class="nav">
-        <a href="#quickstart">1. 설치 및 첫 실행</a>
-        <a href="#login">2. Sabre 로그인 연결</a>
-        <a href="#period">3. 기간 일괄 조회 (엑셀)</a>
-        <a href="#single">4. 단건 일정 최저가 확인</a>
-        <a href="#manage">5. 조회 노선 관리</a>
-        <a href="#enddate">6. 최종 조회일 자동 업데이트</a>
-        <a href="#log-update">7. 실행 로그 · 자동 업데이트</a>
-        <a href="#shortcuts">8. 단축키 · FAQ</a>
+        <a href="#manage">1. 조회 노선 관리</a>
+        <a href="#login">2. Sabre 로그인</a>
+        <a href="#period">3. 기간 일괄 조회</a>
+        <a href="#single">4. 단건 일정 조회</a>
+        <a href="#enddate">5. 최종 조회일 업데이트</a>
+        <a href="#etc">6. 로그 · 업데이트 · 단축키</a>
       </nav>
       <div class="nav-sep"></div>
-      <a class="repo-link" href="https://github.com/KAKNAKIAK/sabre-auto-lookup/releases/latest" target="_blank" rel="noopener">최신 설치 파일 다운로드</a>
+      <a class="repo-link" href="https://github.com/KAKNAKIAK/sabre-auto-lookup/releases/latest" target="_blank" rel="noopener">최신 버전 다운로드</a>
     </aside>
 
     <main>
       <header class="hero">
         <div class="hero-top">
-          <img src="assets/sabre_icon.png" alt="앱 아이콘" />
+          <img src="assets/sabre_icon.png" alt="아이콘" />
           <div>
             <h1>항공운임 조회 (SABRE VER.) 사용 안내</h1>
-            <p>Sabre Red Web 실시간 가용·운임을 자동 조회해 엑셀로 정리하고, 단건 견적 최저가까지 한 화면에서 확인하는 데스크톱 프로그램입니다.</p>
+            <p>노선 등록 → Sabre 로그인 → 운임 조회 순서대로 따라 하시면 바로 사용할 수 있습니다.</p>
           </div>
         </div>
-        <div class="badges">
-          <span class="badge amber">조회 전용 안전 모드 (예약·발권 명령 차단)</span>
-          <span class="badge blue">내부 API 고속 조회 · 그룹 최저가 통합 엑셀</span>
-          <span class="badge green">단건 일정 최저가 즉시 견적</span>
-        </div>
-        <div class="flow-grid">
-          <div class="flow-card">
-            <span class="flow-step">STEP 1</span>
-            <h3>설치 · 노선 불러오기</h3>
-            <p>셋업 설치 후 <code>sabre-routes.example.csv</code>를 불러오거나 노선을 등록합니다.</p>
-          </div>
-          <div class="flow-card">
-            <span class="flow-step">STEP 2</span>
-            <h3>Sabre 로그인</h3>
-            <p><strong>브라우저 실행/로그인</strong> 클릭 후 계정 입력 및 휴대폰 Okta 푸시를 승인합니다.</p>
-          </div>
-          <div class="flow-card">
-            <span class="flow-step">STEP 3</span>
-            <h3>기간 / 단건 조회</h3>
-            <p>일괄 엑셀 수집 또는 <strong>단건 일정 조회</strong>로 최저가 운임을 확인합니다.</p>
-          </div>
-          <div class="flow-card">
-            <span class="flow-step">STEP 4</span>
-            <h3>엑셀 · 견적 복사</h3>
-            <p><strong>폴더열기</strong>로 엑셀을 열거나 단건 팝업에서 <strong>최저가 복사</strong>를 누릅니다.</p>
-          </div>
+        <div class="flow">
+          <a href="#manage">
+            <span class="step-tag">STEP 1</span>
+            <strong>조회 노선 관리</strong>
+            <span>조회할 노선 등록·불러오기</span>
+          </a>
+          <a href="#login">
+            <span class="step-tag">STEP 2</span>
+            <strong>Sabre 로그인</strong>
+            <span>계정 입력 및 푸시 승인</span>
+          </a>
+          <a href="#period">
+            <span class="step-tag">STEP 3</span>
+            <strong>기간 일괄 조회</strong>
+            <span>일자별 엑셀 자동 수집</span>
+          </a>
+          <a href="#single">
+            <span class="step-tag">STEP 4</span>
+            <strong>단건 일정 조회</strong>
+            <span>특정 날짜 최저가 즉시 확인</span>
+          </a>
         </div>
       </header>
 
-      <!-- 1. 설치 및 첫 실행 -->
-      <section class="card" id="quickstart">
+      <!-- 1. 조회 노선 관리 -->
+      <section class="card" id="manage">
         <div class="sec-head">
           <span class="sec-num">1</span>
-          <h2>설치 및 첫 실행</h2>
+          <h2>조회 노선 관리</h2>
         </div>
-        <ol>
-          <li>배포받은 <code>SabreAutoLookup_Setup_v1.0.0.exe</code>를 실행해 <strong>설치 시작</strong>을 누릅니다. (기본 경로: <code>%LOCALAPPDATA%\SabreAutoLookup</code>, 관리자 권한 불필요)</li>
-          <li>바탕화면 또는 시작 메뉴의 <strong>항공운임 조회 (SABRE VER.)</strong> 아이콘을 실행합니다.</li>
-          <li>최초 설치 시 노선 DB(<code>sabre-routes.json</code>)는 비어 있습니다. 상단 메뉴 <strong>설정 &gt; 조회 노선 관리</strong>(<kbd>Ctrl+R</kbd>)를 열고 하단 <strong>CSV 불러오기</strong>를 눌러 설치 폴더에 함께 들어 있는 <code>sabre-routes.example.csv</code>를 선택하면 샘플 노선 목록이 즉시 등록됩니다.</li>
-        </ol>
-        <div class="callout safe">
-          <strong>안전 원칙 (조회 전용):</strong> 이 프로그램은 Sabre에 예약 저장·발권 명령(<code>E</code>, <code>ER</code>, <code>ET</code>, <code>RF</code>)을 절대 전송하지 않습니다. 모든 날짜 조회는 <code>I</code>(무시/초기화)로 시작해 <code>WPNCB</code> 운임 확인 후 마지막 <code>I</code>로 임시 여정을 완전히 정리합니다.
+        <p class="lead">처음 실행하면 노선이 비어 있습니다. 상단 메뉴 <strong>설정 &gt; 조회 노선 관리</strong>(<kbd>Ctrl+R</kbd>)에서 조회할 노선을 먼저 등록해 주세요.</p>
+
+        <figure class="shot">
+          <img src="docs/manual_images/07_manage_routes.png" alt="조회 노선 관리 화면" />
+          <figcaption><span>조회 노선 관리 화면</span><span>클릭하여 확대</span></figcaption>
+        </figure>
+
+        <ul class="points">
+          <li><strong>예시 노선 불러오기</strong> : 하단 <strong>CSV 불러오기</strong>를 눌러 설치 폴더의 예시 CSV를 선택하면 바로 시작할 수 있습니다.</li>
+          <li><strong>노선 추가 · 복사 · 삭제</strong> : 빈 공간 우클릭으로 <strong>노선 추가</strong>, 기존 행 우클릭으로 <strong>노선 복사 / 삭제</strong>를 실행합니다.</li>
+          <li><strong>간편 수정</strong> : 행을 <strong>더블클릭</strong>하거나 <kbd>F2</kbd>를 눌러 수정하고 <kbd>Enter</kbd>로 저장합니다. (<kbd>Esc</kbd> 취소)</li>
+          <li><strong>엑셀 붙여넣기</strong> : 엑셀에서 여러 행을 복사(<kbd>Ctrl+C</kbd>)해 빈 공간에 붙여넣기(<kbd>Ctrl+V</kbd>)하면 한 번에 추가됩니다.</li>
+        </ul>
+
+        <div class="tip warn">
+          <strong>참고</strong> · 필수 항목이 비어 있는 노선은 메인 화면에 표시되지 않습니다. 조회시작일을 비워 두면 메인 화면의 시작일이 자동 적용됩니다.
         </div>
       </section>
 
-      <!-- 2. Sabre 로그인 및 작업창 연결 -->
+      <!-- 2. Sabre 로그인 -->
       <section class="card" id="login">
         <div class="sec-head">
           <span class="sec-num">2</span>
-          <h2>Sabre 로그인 및 작업창 연결</h2>
+          <h2>Sabre 로그인</h2>
         </div>
-        <p>메인 화면 우측 상단의 <strong>브라우저 실행/로그인</strong> 버튼을 누르면 로그인 정보 입력 창이 열립니다.</p>
+        <p class="lead">메인 화면 상단의 <strong>브라우저 실행/로그인</strong>을 눌러 Sabre 작업창에 연결합니다.</p>
 
         <div class="shot-grid">
           <figure class="shot compact">
-            <img src="docs/manual_images/02_login_dialog.png" alt="프로그램 로그인 정보 입력 팝업" />
-            <figcaption><span>① 프로그램 로그인 정보 팝업 (<kbd>Ctrl+L</kbd>)</span><span>클릭하여 확대</span></figcaption>
+            <img src="docs/manual_images/02_login_dialog.png" alt="로그인 정보 입력 팝업" />
+            <figcaption><span>① 아이디 · 비밀번호 · PCC 입력</span><span>클릭하여 확대</span></figcaption>
           </figure>
           <figure class="shot">
-            <img src="docs/manual_images/03_sabre_login.png" alt="Sabre Agency Workspace 로그인 화면" />
-            <figcaption><span>② Sabre Agency Workspace 로그인 화면 자동 입력</span><span>클릭하여 확대</span></figcaption>
+            <img src="docs/manual_images/03_sabre_login.png" alt="Sabre 로그인 화면" />
+            <figcaption><span>② Sabre 화면 자동 입력</span><span>클릭하여 확대</span></figcaption>
           </figure>
         </div>
 
-        <ol>
-          <li><strong>Agent ID · Password · PCC</strong>를 입력하고 <strong>로그인 정보 기억하기</strong>에 체크하면 2회차부터는 팝업 없이 바로 로그인됩니다.</li>
-          <li><strong>설정 &gt; 로그인 정보</strong>(<kbd>Ctrl+L</kbd>)에서 다시 열면 기존 저장값은 <code>4**8</code>, <code>******</code>처럼 일부 마스킹되어 표시되며, 변경할 항목만 입력해 저장할 수 있습니다.</li>
-          <li>로그인을 진행하면 전용 Chrome(포트 <code>9223</code>)이 열리고 Sabre 로그인 화면에 계정 정보가 자동 입력됩니다.</li>
-          <li>휴대폰으로 <strong>Okta Verify 푸시 알림</strong>이 도착하면 승인해 주세요. 승인하지 않아 만료되면 5분 간격으로 최대 5회 자동 재전송합니다.</li>
-        </ol>
-
         <figure class="shot">
-          <img src="docs/manual_images/04_sabre_workspace.png" alt="Sabre Red Web 작업창 연결 완료" />
-          <figcaption><span>③ 로그인 완료 후 Sabre Red Web 작업창 (<code>I → IGD</code> 정상 연결 상태 · 민감 코드 가림 처리)</span><span>클릭하여 확대</span></figcaption>
+          <img src="docs/manual_images/04_sabre_workspace.png" alt="Sabre 작업창 연결 완료" />
+          <figcaption><span>③ 휴대폰 Okta 푸시 승인 후 작업창 연결 완료</span><span>클릭하여 확대</span></figcaption>
         </figure>
 
-        <div class="callout info">
-          <strong>자동 최소화 &amp; 세션 복구:</strong> 로그인이 완료되면 전용 Chrome은 자동으로 최소화(백그라운드) 상태로 유지되므로 다른 업무를 그대로 보실 수 있습니다. 장시간 조회 중 세션이 만료되면 프로그램이 자동으로 재로그인을 시도한 뒤 중단된 날짜부터 이어서 수집합니다. (단, 전용 Chrome 창은 조회 중 닫지 마세요.)
+        <ul class="points">
+          <li><strong>로그인 정보 기억하기</strong> : 체크해 두면 다음부터는 입력 창 없이 바로 로그인됩니다. (변경은 <kbd>Ctrl+L</kbd>)</li>
+          <li><strong>Okta 푸시 승인</strong> : 휴대폰 알림을 승인하면 자동으로 연결되며, 완료 후 Sabre 창은 최소화 상태로 유지됩니다.</li>
+          <li><strong>주의</strong> : 조회하는 동안 최소화된 Sabre 브라우저 창은 닫지 마세요.</li>
+        </ul>
+
+        <div class="tip safe">
+          <strong>안심 사용</strong> · 이 프로그램은 운임 조회 전용이며 예약 저장이나 발권은 절대 실행하지 않습니다.
         </div>
       </section>
 
@@ -496,29 +390,20 @@
       <section class="card" id="period">
         <div class="sec-head">
           <span class="sec-num">3</span>
-          <h2>기간 일괄 조회 (엑셀 자동 수집)</h2>
+          <h2>기간 일괄 조회 (엑셀 저장)</h2>
         </div>
-        <p>여러 노선그룹과 편명의 일자별 운임을 한 번에 수집해 개별 엑셀 및 그룹 최저가 통합 엑셀로 저장하는 기본 모드입니다.</p>
+        <p class="lead">원하는 기간과 노선을 선택하면 날짜별 운임과 그룹 최저가를 엑셀로 자동 저장합니다.</p>
 
         <figure class="shot">
-          <img src="docs/manual_images/01_main_period.png" alt="메인 화면 기간 일괄 조회 모드" />
-          <figcaption><span>기간 일괄 조회 메인 화면 — 날짜 프리셋, 노선 검색, 카드별 전체선택/해제, 누적 진행바</span><span>클릭하여 확대</span></figcaption>
+          <img src="docs/manual_images/01_main_period.png" alt="메인 화면 기간 일괄 조회" />
+          <figcaption><span>메인 화면 — 날짜 설정, 노선 선택, 진행률 확인</span><span>클릭하여 확대</span></figcaption>
         </figure>
 
-        <h3>화면 구성 및 사용 순서</h3>
-        <ul>
-          <li><strong>시작일 / 종료일</strong>: 시작일 기본값은 <code>오늘 + 3일</code>입니다. <code>20261201</code>처럼 숫자 8자리만 입력하고 <kbd>Tab</kbd>을 누르거나 다른 곳을 클릭하면 자동으로 <code>2026-12-01</code>로 변환됩니다.</li>
-          <li><strong>기간 빠른 설정</strong>: 종료일 옆 <strong>한달 · 분기 · 반기 · 일년</strong> 버튼을 누르면 시작일 기준으로 종료일이 자동 계산됩니다. 종료일을 비워 두면 각 노선에 등록된 <strong>조회종료일</strong>까지 수집합니다.</li>
-          <li><strong>날짜 교집합 규칙</strong>: 노선별 조회시작일/종료일이 설정되어 있으면 메인 화면 기간과 겹치는 실제 유효 기간만 자동으로 조회합니다. (시작일 &gt; 종료일이거나 둘 다 비어 있으면 실행 전 알림으로 안내)</li>
-          <li><strong>노선 검색 &amp; 선택</strong>: 검색창에 노선그룹·공항·항공사·편명을 입력하면 실시간 필터링되며, 기존 체크 상태는 유지됩니다. 카드 제목 옆 <strong>전체선택 / 전체해제</strong> 버튼 하나로 그룹을 일괄 토글할 수 있습니다.</li>
-          <li><strong>조회 시작 / 정지</strong>: 파란색 <strong>▶ 조회 시작</strong>을 누르면 수집이 시작되고 같은 버튼이 빨간색 <strong>■ 정지</strong>로 전환됩니다. 하단 진행바는 선택한 전체 노선·날짜 합계 기준의 누적 진행률을 표시합니다.</li>
-        </ul>
-
-        <h3>엑셀 저장 결과</h3>
-        <ul>
-          <li><strong>저장 경로 변경</strong>: 상단 메뉴 <strong>설정 &gt; 엑셀 저장 경로</strong>(<kbd>Ctrl+E</kbd>)에서 원하는 폴더를 지정할 수 있으며, 카드 우측 <strong>폴더열기</strong> 버튼으로 즉시 열 수 있습니다.</li>
-          <li><strong>개별 노선 엑셀</strong>: 날짜(A열), 운임(B열: 정수 금액 / <code>예약마감</code> / <code>조회불가</code>) 형식으로 저장되며, <code>조회불가</code> 날짜는 1회 자동 재조회합니다.</li>
-          <li><strong>그룹 최저가 통합 엑셀</strong>: 같은 노선그룹 내 여러 항공사를 함께 조회하면 날짜별 항공사 운임과 <strong>최저가·최저가 항공사 수식</strong>이 담긴 통합 시트가 자동 생성됩니다.</li>
+        <ul class="points">
+          <li><strong>날짜 입력</strong> : 숫자 8자리(예: 20261201)만 입력해도 자동으로 날짜 형식으로 바뀝니다. 종료일은 <strong>한달 · 분기 · 반기 · 일년</strong> 버튼으로 빠르게 지정하거나 비워 둘 수 있습니다.</li>
+          <li><strong>노선 선택</strong> : 검색창으로 원하는 노선을 찾고, 카드별 <strong>전체선택 / 전체해제</strong> 또는 개별 체크박스로 선택합니다.</li>
+          <li><strong>조회 실행 및 중단</strong> : <strong>▶ 조회 시작</strong>을 누르면 수집이 시작되며, 진행 중 같은 버튼(<strong>■ 정지</strong>)으로 멈출 수 있습니다.</li>
+          <li><strong>엑셀 확인</strong> : 완료 후 <strong>폴더열기</strong>를 눌러 저장된 엑셀을 확인합니다. (저장 폴더 변경은 <kbd>Ctrl+E</kbd>)</li>
         </ul>
       </section>
 
@@ -526,165 +411,86 @@
       <section class="card" id="single">
         <div class="sec-head">
           <span class="sec-num">4</span>
-          <h2>단건 일정 조회 (최저가 즉시 견적)</h2>
+          <h2>단건 일정 조회 (최저가 확인)</h2>
         </div>
-        <p>고객 단건 견적처럼 특정 출발일·귀국일에 대해 선택한 노선그룹 안의 여러 항공사 중 <strong>어디가 가장 저렴한지 즉시 비교</strong>할 때 사용하는 기능입니다.</p>
+        <p class="lead">특정 출발일·도착일 견적이 필요할 때 여러 항공사 중 최저가 운임과 스케줄을 즉시 비교합니다.</p>
 
         <figure class="shot">
-          <img src="docs/manual_images/05_single_date_mode.png" alt="단건 일정 조회 모드 화면" />
-          <figcaption><span>단건 일정 조회 체크 시 — 한국출발일 · 한국도착일 · 인원 표시, 초록색 ▶ 최저가 확인 버튼으로 전환</span><span>클릭하여 확대</span></figcaption>
+          <img src="docs/manual_images/05_single_date_mode.png" alt="단건 일정 조회 모드" />
+          <figcaption><span>단건 일정 조회 체크 시 — 한국출발일 · 한국도착일 · 인원 입력</span><span>클릭하여 확대</span></figcaption>
         </figure>
-
-        <ol>
-          <li>상단 <strong>단건 일정 조회</strong> 체크박스를 선택합니다.</li>
-          <li>입력란이 <strong>한국출발일 · 한국도착일 · 인원(기본 1명)</strong>으로 바뀌고, 노선 카드의 <code>+N</code> 일수 표시는 헷갈리지 않도록 자동으로 숨겨집니다.</li>
-          <li>비교할 노선그룹(예: <code>VN_ICN-PQC-LCC</code> 전체)을 체크한 뒤 초록색 <strong>▶ 최저가 확인</strong> 버튼을 누릅니다.</li>
-          <li>야간 귀국편(<code>+1일</code> 새벽 한국 도착)은 프로그램이 현지 출발일을 자동으로 하루 당겨(<code>-1일</code>) 정확히 한국도착일에 맞춰 조회합니다.</li>
-        </ol>
 
         <figure class="shot">
           <img src="docs/manual_images/06_single_date_result.png" alt="단건 일정 최저가 결과 팝업" />
-          <figcaption><span>단건 일정 결과 팝업 — 상단 ★ 최저가 일정·기본운임·택스·총액 + 하단 그 외 노선별 비교</span><span>클릭하여 확대</span></figcaption>
+          <figcaption><span>조회 완료 팝업 — 상단 ★ 최저가 + 그 외 항공사 비교</span><span>클릭하여 확대</span></figcaption>
         </figure>
 
-        <ul>
-          <li><strong>최저가 복사</strong>: 상단 <code>★ 최저가</code> 블록만 클립보드에 복사해 메신저·견적서에 바로 붙여넣을 수 있습니다.</li>
-          <li><strong>전체 복사</strong>: 최저가와 <code>[그 외 조회 결과]</code>(각 항공사의 일정·금액 또는 조회불가 사유)를 한꺼번에 복사합니다.</li>
+        <ul class="points">
+          <li><strong>모드 전환</strong> : 상단 <strong>단건 일정 조회</strong>에 체크하면 <strong>한국출발일 · 한국도착일 · 인원</strong> 입력란과 초록색 <strong>▶ 최저가 확인</strong> 버튼으로 바뀝니다.</li>
+          <li><strong>야간 귀국 자동 보정</strong> : 다음 날 새벽 한국에 도착하는 야간편도 한국도착일 기준으로 자동 맞춰 조회합니다.</li>
+          <li><strong>견적 복사</strong> : 결과 팝업에서 <strong>최저가 복사</strong> 또는 <strong>전체 복사</strong>를 눌러 바로 붙여넣어 사용하세요.</li>
         </ul>
       </section>
 
-      <!-- 5. 조회 노선 관리 -->
-      <section class="card" id="manage">
-        <div class="sec-head">
-          <span class="sec-num">5</span>
-          <h2>조회 노선 관리 (<kbd>Ctrl+R</kbd>)</h2>
-        </div>
-        <p>상단 메뉴 <strong>설정 &gt; 조회 노선 관리</strong>(<kbd>Ctrl+R</kbd>)에서 조회 대상 노선·편명·항공일수·인원·클래스·운임기준(<code>FARE KRW</code> / <code>TOTAL KRW</code>)을 엑셀처럼 편집할 수 있습니다.</p>
-
-        <figure class="shot">
-          <img src="docs/manual_images/07_manage_routes.png" alt="조회 노선 관리 창" />
-          <figcaption><span>조회 노선 관리 창 — 동일 노선그룹 병합, 짝/홀수 그룹 줄무늬, 클릭 시 전체 행 붉은색 강조</span><span>클릭하여 확대</span></figcaption>
-        </figure>
-
-        <table>
-          <thead>
-            <tr>
-              <th>조작 방법</th>
-              <th>동작 내용</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>행 <strong>더블클릭</strong> 또는 <kbd>F2</kbd></td>
-              <td>해당 행 전체 인라인 수정 활성화 (<kbd>Enter</kbd> 저장 / <kbd>Esc</kbd> 취소). <code>운임만</code>과 <code>사용</code>은 드롭박스로 선택합니다.</td>
-            </tr>
-            <tr>
-              <td>입력 칸 내 <kbd>↑</kbd> / <kbd>↓</kbd></td>
-              <td>텍스트 커서를 칸 맨 앞(<kbd>↑</kbd>) / 맨 끝(<kbd>↓</kbd>)으로 즉시 이동합니다.</td>
-            </tr>
-            <tr>
-              <td><strong>빈 공간 우클릭</strong></td>
-              <td><strong>노선 추가</strong>(기본값: 인원 <code>4</code>, 클래스 <code>Y</code>, <code>FARE KRW</code>, <code>사용</code>) 또는 <strong>붙여넣기로 노선 추가</strong></td>
-            </tr>
-            <tr>
-              <td><strong>기존 행 우클릭</strong></td>
-              <td><strong>노선 복사</strong>(복사된 행으로 즉시 포커스 이동) · <strong>노선 삭제</strong> · <strong>최종 조회일 업데이트</strong></td>
-            </tr>
-            <tr>
-              <td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd></td>
-              <td>셀 단위 복사·붙여넣기 및 엑셀 다중 셀·다중 행 붙여넣기 지원. 빈 공간에 4행을 붙여넣으면 4개 노선이 한 번에 신규 추가됩니다.</td>
-            </tr>
-            <tr>
-              <td><strong>CSV 내보내기 / 불러오기</strong></td>
-              <td>노선 목록 전체를 엑셀 호환 CSV로 백업하거나 복원합니다. (설치 폴더의 <code>sabre-routes.example.csv</code> 참고)</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div class="callout warn">
-          <strong>미완성 행 &amp; 빈 조회시작일 동작:</strong> 일부 필드만 채워 임시 저장한 노선 행은 표에 보관되지만, 필수 필드가 모두 채워지기 전까지는 메인 자동조회 화면에 노출되지 않습니다. 또한 노선의 <strong>조회시작일</strong>이 비어 있으면 표에는 메인 화면의 현재 시작일이 자동으로 표시됩니다.
-        </div>
-      </section>
-
-      <!-- 6. 최종 조회일 자동 업데이트 -->
+      <!-- 5. 최종 조회일 업데이트 -->
       <section class="card" id="enddate">
         <div class="sec-head">
+          <span class="sec-num">5</span>
+          <h2>최종 조회일 업데이트</h2>
+        </div>
+        <p class="lead">항공사 스케줄이 열려 있는 마지막 날짜를 자동으로 찾아 노선의 <strong>조회종료일</strong>을 갱신합니다.</p>
+
+        <figure class="shot">
+          <img src="docs/manual_images/08_end_date_preview.png" alt="최종 조회일 탐색 미리보기" />
+          <figcaption><span>변경 미리보기 — 확인할 항목만 체크해 반영</span><span>클릭하여 확대</span></figcaption>
+        </figure>
+
+        <ul class="points">
+          <li><strong>실행 방법</strong> : <strong>조회 노선 관리</strong>(<kbd>Ctrl+R</kbd>) 하단의 <strong>최종 조회일 업데이트</strong> 버튼(전체) 또는 특정 행 <strong>우클릭 &gt; 최종 조회일 업데이트</strong>(단건)를 누릅니다.</li>
+          <li><strong>미리보기 적용</strong> : 탐색이 끝나면 변경된 노선만 체크된 미리보기 창이 뜨며, <strong>선택 항목 적용</strong>을 누르면 저장됩니다.</li>
+          <li><strong>시즌분할(확인필요)</strong> : 같은 편명이 시즌별로 2줄 이상 나뉘어 있을 때 앞 시즌이 덮어써지지 않도록 자동 보호(체크 해제)됩니다.</li>
+        </ul>
+      </section>
+
+      <!-- 6. 로그 · 업데이트 · 단축키 -->
+      <section class="card" id="etc">
+        <div class="sec-head">
           <span class="sec-num">6</span>
-          <h2>최종 조회일 자동 업데이트</h2>
-        </div>
-        <p>항공사 스케줄이 연장될 때마다 노선별 <strong>조회종료일</strong>을 일일이 찾을 필요 없이, Sabre에 열려 있는 마지막 운항일을 이진 탐색(약 360일 범위)으로 자동 찾아 반영합니다.</p>
-
-        <figure class="shot">
-          <img src="docs/manual_images/08_end_date_preview.png" alt="최종 조회일 탐색 미리보기 팝업" />
-          <figcaption><span>최종 조회일 탐색 결과 미리보기 — 변경 · 유지 · 시즌분할(확인필요) 구분 후 체크 항목만 저장</span><span>클릭하여 확대</span></figcaption>
-        </figure>
-
-        <ul>
-          <li><strong>전체 탐색</strong>: 조회 노선 관리 하단의 <strong>최종 조회일 업데이트</strong> 버튼을 누릅니다. (탐색 중에는 <strong>■ 탐색 정지</strong>로 중단 가능)</li>
-          <li><strong>선택 행만 탐색</strong>: 특정 노선 행에서 <strong>우클릭 &gt; 최종 조회일 업데이트</strong>를 누르면 해당 행만 빠르게 갱신합니다.</li>
-          <li><strong>시즌분할(확인필요) 보호</strong>: 같은 편명이 동계/하계 등으로 2줄 이상 나뉘어 등록된 경우, 종료일이 가장 늦은 마지막 시즌 행만 기본 체크되고 앞 시즌 행은 실수로 덮어쓰지 않도록 <code>시즌분할(확인필요)</code> 표시와 함께 체크가 해제됩니다.</li>
-        </ul>
-      </section>
-
-      <!-- 7. 실행 로그 및 자동 업데이트 -->
-      <section class="card" id="log-update">
-        <div class="sec-head">
-          <span class="sec-num">7</span>
-          <h2>실행 로그 · 자동 업데이트</h2>
+          <h2>실행 로그 · 업데이트 · 단축키</h2>
         </div>
 
         <figure class="shot">
-          <img src="docs/manual_images/09_log_window.png" alt="실행 로그 팝업 창" />
-          <figcaption><span>메인 화면 우측 하단 [로그 보기] 클릭 시 표시되는 실시간 실행 로그 창</span><span>클릭하여 확대</span></figcaption>
+          <img src="docs/manual_images/09_log_window.png" alt="실행 로그 창" />
+          <figcaption><span>우측 하단 [로그 보기] 클릭 시 상세 진행 내역 확인</span><span>클릭하여 확대</span></figcaption>
         </figure>
 
-        <ul>
-          <li><strong>실행 로그</strong>: 평소에는 메인 화면 하단 상태줄에 최신 1줄만 깔끔하게 표시되며, 상세 진행 기록·오류 원인을 보고 싶을 때 우측 하단 <strong>로그 보기</strong>를 눌러 확인합니다.</li>
-          <li><strong>자동 업데이트</strong>: 앱을 실행하면 백그라운드에서 GitHub 릴리즈 최신 버전을 자동 확인합니다. 새 버전이 있으면 안내 창이 뜨고, 승인 시 설치 파일 다운로드·SHA256 무결성 검증·자동 교체 및 재실행까지 한 번에 완료됩니다.</li>
-          <li><strong>수동 확인</strong>: 상단 메뉴 <strong>도움말 &gt; 업데이트 확인</strong>으로 언제든 최신 버전을 확인할 수 있습니다. 업데이트 시 기존 <code>sabre-config.json</code>(로그인/경로)과 <code>sabre-routes.json</code>(노선 목록)은 그대로 보존됩니다.</li>
+        <ul class="points">
+          <li><strong>로그 보기</strong> : 상세 진행 상황이나 오류 원인이 필요할 때 메인 화면 우측 하단 <strong>로그 보기</strong>를 눌러 확인합니다.</li>
+          <li><strong>자동 업데이트</strong> : 새 버전이 올라오면 프로그램 시작 시 자동으로 알려주며, 승인만 누르면 기존 설정과 노선을 유지한 채 업데이트됩니다. (수동 확인: <strong>도움말 &gt; 업데이트 확인</strong>)</li>
         </ul>
-      </section>
-
-      <!-- 8. 단축키 및 FAQ -->
-      <section class="card" id="shortcuts">
-        <div class="sec-head">
-          <span class="sec-num">8</span>
-          <h2>단축키 일람 및 자주 묻는 질문</h2>
-        </div>
 
         <table>
           <thead>
             <tr>
               <th>단축키</th>
-              <th>적용 창</th>
               <th>기능</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><kbd>Alt+Enter</kbd></td><td>메인 · 노선 관리 · 팝업</td><td>창 최대화 / 원래 크기 전환</td></tr>
-            <tr><td><kbd>Ctrl+Q</kbd></td><td>메인 · 노선 관리</td><td>창 닫기 / 프로그램 끝내기</td></tr>
-            <tr><td><kbd>Ctrl+L</kbd></td><td>메인 화면</td><td>설정 &gt; 로그인 정보 열기</td></tr>
-            <tr><td><kbd>Ctrl+E</kbd></td><td>메인 화면</td><td>설정 &gt; 엑셀 저장 경로 열기</td></tr>
-            <tr><td><kbd>Ctrl+R</kbd></td><td>메인 화면</td><td>설정 &gt; 조회 노선 관리 열기</td></tr>
-            <tr><td><kbd>F2</kbd> / <kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>조회 노선 관리</td><td>인라인 편집 시작 / 저장 / 취소</td></tr>
-            <tr><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd></td><td>조회 노선 관리</td><td>셀 복사 / 다중 셀·다중 행 붙여넣기</td></tr>
-            <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>조회 노선 관리(편집 중)</td><td>입력 칸 맨 앞 / 맨 끝 커서 이동</td></tr>
+            <tr><td><kbd>Alt+Enter</kbd></td><td>창 최대화 / 원래 크기</td></tr>
+            <tr><td><kbd>Ctrl+Q</kbd></td><td>창 닫기 / 프로그램 끝내기</td></tr>
+            <tr><td><kbd>Ctrl+L</kbd></td><td>설정 &gt; 로그인 정보</td></tr>
+            <tr><td><kbd>Ctrl+E</kbd></td><td>설정 &gt; 엑셀 저장 경로</td></tr>
+            <tr><td><kbd>Ctrl+R</kbd></td><td>설정 &gt; 조회 노선 관리</td></tr>
+            <tr><td><kbd>F2</kbd> / <kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>노선 행 수정 / 저장 / 취소</td></tr>
+            <tr><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd></td><td>셀 복사 / 엑셀 다중 붙여넣기</td></tr>
+            <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>수정 중인 칸의 맨 앞 / 맨 끝 이동</td></tr>
           </tbody>
         </table>
-
-        <h3>자주 묻는 질문 (FAQ)</h3>
-        <ul>
-          <li><strong>Q. 설치 후 메인 화면에 노선이 하나도 안 보여요.</strong><br />
-            A. 신규 설치 시 노선 DB는 비어 있습니다. <kbd>Ctrl+R</kbd>로 <strong>조회 노선 관리</strong>를 열어 하단 <strong>CSV 불러오기</strong>에서 설치 폴더의 <code>sabre-routes.example.csv</code>를 불러오시거나 빈 공간 우클릭으로 직접 노선을 추가하세요.</li>
-          <li><strong>Q. TOPAS 항공자동조회와 동시에 실행해도 되나요?</strong><br />
-            A. 네. TOPAS는 Chrome 포트 <code>9222</code>, Sabre는 포트 <code>9223</code>으로 완전히 분리되어 있어 서로 간섭하지 않습니다. 단, 동일 Sabre 계정으로 본 프로그램을 2개 동시에 실행하지는 마세요.</li>
-          <li><strong>Q. 조회 중 세션이 만료되었다는 로그가 떠요.</strong><br />
-            A. 프로그램이 자동으로 Sabre 재로그인을 시도합니다. 휴대폰에 Okta 푸시가 오면 승인해 주시면 끊긴 날짜부터 이어서 수집합니다.</li>
-        </ul>
       </section>
 
       <footer>
-        항공운임 조회 (SABRE VER.) 사용자 매뉴얼 · 이미지는 클릭하면 크게 볼 수 있습니다.
+        항공운임 조회 (SABRE VER.) 사용 안내 · 이미지를 클릭하면 크게 볼 수 있습니다.
       </footer>
     </main>
   </div>
