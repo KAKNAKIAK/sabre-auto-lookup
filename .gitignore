@@ -1,6 +1,7 @@
 sabre-config.json
 output/
 .chrome-sabre-profile/
+backups/
 __pycache__/
 *.pyc
 backup_*/

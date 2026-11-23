@@ -23,12 +23,13 @@ import sabre_terminal as t
 import sabre_updater as u
 from sabre_manage import ManageWindow
 from sabre_ui import (
-    BASE_DIR, CONFIG_PATH, FIELDS, MANAGE_COLS, ROUTES_PATH,
-    EndDatePreviewDialog, LoginDialog, LogWindow, OutputPathDialog, SingleDateResultDialog,
-    add_months, apply_theme, clear_remembered_login, format_date_edit,
-    get_output_root, has_saved_login, has_saved_output_root, load_app_icon,
-    mask_secret, matches_route_query, read_config, save_login_config,
-    save_output_root, toggle_window_maximize, validate_output_dir,
+    BACKUP_DIR, BASE_DIR, CONFIG_PATH, FIELDS, MANAGE_COLS, ROUTES_PATH,
+    EndDatePreviewDialog, LoginDialog, LogWindow, OutputPathDialog, RouteBackupDialog,
+    SingleDateResultDialog, add_months, apply_theme, clear_remembered_login,
+    format_date_edit, get_backup_settings, get_output_root, has_saved_login,
+    has_saved_output_root, load_app_icon, mask_secret, matches_route_query,
+    read_config, save_backup_settings, save_login_config, save_output_root,
+    toggle_window_maximize, validate_output_dir,
 )
 
 MANUAL_URL = "https://kaknakiak.github.io/sabre-auto-lookup/"
@@ -126,6 +127,11 @@ class App(QMainWindow):
         self.manage_routes_action.setShortcut(QKeySequence("Ctrl+R"))
         self.manage_routes_action.triggered.connect(self.open_manage_window)
         self.settings_menu.addAction(self.manage_routes_action)
+
+        self.backup_routes_action = QAction("노선 백업 관리", self)
+        self.backup_routes_action.setShortcut(QKeySequence("Ctrl+B"))
+        self.backup_routes_action.triggered.connect(self.open_route_backup_settings)
+        self.settings_menu.addAction(self.backup_routes_action)
 
         self.help_menu = mb.addMenu("도움말")
         self.help_menu.addAction("업데이트 확인", lambda: self.check_for_updates(manual=True))
@@ -270,10 +276,29 @@ class App(QMainWindow):
         sorted_routes = sorted(self.routes, key=c.route_group, reverse=True)
         if sorted_routes != self.routes:
             self.routes = sorted_routes
-            c.save_routes(ROUTES_PATH, self.routes)
+            self._save_routes_file()
             self.refresh_jobs()
         self.manage_win = ManageWindow(self)
         self.manage_win.show()
+
+    def _save_routes_file(self) -> None:
+        c.save_routes(
+            ROUTES_PATH,
+            self.routes,
+            backup_dir=BACKUP_DIR,
+            backup_cfg=get_backup_settings(path=CONFIG_PATH),
+        )
+
+    def open_route_backup_settings(self) -> None:
+        def _apply_restored(routes: list[dict]) -> None:
+            self.routes = routes
+            if self.manage_win is not None and self.manage_win.isVisible():
+                self.manage_win.refresh_table()
+            self.refresh_jobs()
+            self.log(f"노선 백업 복원 완료 ({len(routes)}개 노선)")
+
+        dlg = RouteBackupDialog(self, ROUTES_PATH, BACKUP_DIR, CONFIG_PATH, on_restored=_apply_restored)
+        dlg.exec()
 
     def _apply_login_result(self, creds: dict) -> None:
         self.session_cfg = creds
@@ -667,7 +692,7 @@ class App(QMainWindow):
         self.all_toggle_btn.setText("전체 해제" if any_vis_checked else "전체 선택")
 
     def save_routes_and_refresh(self) -> None:
-        c.save_routes(ROUTES_PATH, self.routes)
+        self._save_routes_file()
         if self.manage_win is not None and self.manage_win.isVisible():
             self.manage_win.refresh_table()
         self.refresh_jobs()
@@ -775,6 +800,10 @@ class App(QMainWindow):
         threading.Thread(target=self.worker, args=(planned,), daemon=True).start()
 
     def _begin_running(self) -> None:
+        self._clear_logs()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress_lbl.setText("0%")
         self.stop.clear()
         self._running = True
         self._refresh_run_button()

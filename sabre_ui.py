@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import os
 import re
 import sys
 from datetime import date
@@ -13,7 +14,7 @@ from PySide6.QtGui import QColor, QIcon, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QFileDialog, QFormLayout,
     QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-    QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 import sabre_core as c
@@ -21,6 +22,7 @@ import sabre_core as c
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 ROUTES_PATH = BASE_DIR / "sabre-routes.json"
 CONFIG_PATH = BASE_DIR / "sabre-config.json"
+BACKUP_DIR = BASE_DIR / "backups"
 
 
 def get_asset_path(name: str) -> Path:
@@ -415,6 +417,19 @@ def save_output_root(folder: str | Path, path: Path = CONFIG_PATH) -> None:
     path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def get_backup_settings(cfg: dict | None = None, path: Path = CONFIG_PATH) -> dict:
+    src = cfg if cfg is not None else read_config(path)
+    return c.normalize_backup_cfg(src.get("routeBackup") if isinstance(src, dict) else None)
+
+
+def save_backup_settings(settings: dict, path: Path = CONFIG_PATH) -> dict:
+    normalized = c.normalize_backup_cfg(settings)
+    cfg = read_config(path)
+    cfg["routeBackup"] = normalized
+    path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return normalized
+
+
 def save_login_config(creds: dict, path: Path = CONFIG_PATH) -> None:
     data = {
         **read_config(path),
@@ -789,6 +804,215 @@ class EndDatePreviewDialog(QDialog):
             if chk.isChecked() and item["newEnd"]
         }
         self.accept()
+
+
+class RouteBackupDialog(QDialog):
+    """노선 DB 자동 백업 설정 및 시점 복원 팝업."""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        routes_path: Path,
+        backup_dir: Path,
+        config_path: Path,
+        on_restored=None,
+    ):
+        super().__init__(parent)
+        self.routes_path = routes_path
+        self.backup_dir = backup_dir
+        self.config_path = config_path
+        self.on_restored = on_restored
+        self._items: list[dict] = []
+        self.setWindowTitle("노선 백업 관리")
+        self.setModal(True)
+        self.resize(680, 500)
+        bind_alt_enter(self)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(12)
+
+        cfg_card = QFrame()
+        cfg_card.setObjectName("SurfaceCard")
+        cfg_lay = QVBoxLayout(cfg_card)
+        cfg_lay.setContentsMargins(14, 12, 14, 12)
+        cfg_lay.setSpacing(8)
+
+        cur = get_backup_settings(path=self.config_path)
+        self.enabled_chk = QCheckBox("노선 변경 시 자동 백업 사용")
+        self.enabled_chk.setChecked(cur["enabled"])
+        cfg_lay.addWidget(self.enabled_chk)
+
+        opt_row = QHBoxLayout()
+        opt_row.setSpacing(10)
+        lbl_int = QLabel("백업 주기 (분)")
+        lbl_int.setObjectName("FieldLabel")
+        self.interval_spin = QSpinBox()
+        self.interval_spin.setRange(0, 1440)
+        self.interval_spin.setValue(cur["intervalMinutes"])
+        self.interval_spin.setFixedWidth(84)
+        hint_int = QLabel("(0 = 변경 시마다 즉시)")
+        hint_int.setObjectName("MutedLabel")
+
+        lbl_keep = QLabel("보관 개수")
+        lbl_keep.setObjectName("FieldLabel")
+        self.keep_spin = QSpinBox()
+        self.keep_spin.setRange(1, 200)
+        self.keep_spin.setValue(cur["keepCount"])
+        self.keep_spin.setFixedWidth(80)
+        lbl_unit = QLabel("개")
+        lbl_unit.setObjectName("MutedLabel")
+
+        save_cfg_btn = QPushButton("설정 저장")
+        save_cfg_btn.setObjectName("PrimaryBtn")
+        save_cfg_btn.clicked.connect(self.save_settings)
+
+        opt_row.addWidget(lbl_int)
+        opt_row.addWidget(self.interval_spin)
+        opt_row.addWidget(hint_int)
+        opt_row.addSpacing(12)
+        opt_row.addWidget(lbl_keep)
+        opt_row.addWidget(self.keep_spin)
+        opt_row.addWidget(lbl_unit)
+        opt_row.addStretch()
+        opt_row.addWidget(save_cfg_btn)
+        cfg_lay.addLayout(opt_row)
+
+        self.enabled_chk.toggled.connect(self._sync_enabled)
+        self._sync_enabled(cur["enabled"])
+        lay.addWidget(cfg_card)
+
+        list_head = QHBoxLayout()
+        title_lbl = QLabel("백업 목록 (최신순)")
+        title_lbl.setObjectName("SectionTitle")
+        self.count_lbl = QLabel("")
+        self.count_lbl.setObjectName("MutedLabel")
+        now_btn = QPushButton("지금 백업")
+        now_btn.setObjectName("SmallBtn")
+        now_btn.clicked.connect(self.backup_now)
+        folder_btn = QPushButton("백업 폴더 열기")
+        folder_btn.setObjectName("SmallBtn")
+        folder_btn.clicked.connect(self.open_backup_dir)
+        list_head.addWidget(title_lbl)
+        list_head.addSpacing(6)
+        list_head.addWidget(self.count_lbl)
+        list_head.addStretch()
+        list_head.addWidget(now_btn)
+        list_head.addWidget(folder_btn)
+        lay.addLayout(list_head)
+
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["백업 일시", "노선 수", "파일명"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        lay.addWidget(self.table, 1)
+
+        bar = QHBoxLayout()
+        del_btn = QPushButton("선택 삭제")
+        del_btn.clicked.connect(self.delete_selected)
+        restore_btn = QPushButton("선택 시점으로 복원")
+        restore_btn.setObjectName("PrimaryBtn")
+        restore_btn.clicked.connect(self.restore_selected)
+        close_btn = QPushButton("닫기")
+        close_btn.clicked.connect(self.accept)
+        bar.addWidget(del_btn)
+        bar.addStretch()
+        bar.addWidget(restore_btn)
+        bar.addWidget(close_btn)
+        lay.addLayout(bar)
+
+        self.refresh_list()
+
+    def _sync_enabled(self, on: bool) -> None:
+        self.interval_spin.setEnabled(on)
+        self.keep_spin.setEnabled(on)
+
+    def refresh_list(self) -> None:
+        self._items = c.list_route_backups(self.backup_dir)
+        self.table.setRowCount(len(self._items))
+        for r, item in enumerate(self._items):
+            vals = (item["savedAt"], f"{item['count']}개", item["name"])
+            for col, val in enumerate(vals):
+                ti = QTableWidgetItem(val)
+                if col < 2:
+                    ti.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(r, col, ti)
+        self.count_lbl.setText(f"총 {len(self._items)}개")
+
+    def save_settings(self) -> None:
+        saved = save_backup_settings(
+            {
+                "enabled": self.enabled_chk.isChecked(),
+                "intervalMinutes": self.interval_spin.value(),
+                "keepCount": self.keep_spin.value(),
+            },
+            path=self.config_path,
+        )
+        c._prune_backups(self.backup_dir, saved["keepCount"])
+        self.refresh_list()
+        QMessageBox.information(
+            self,
+            "저장 완료",
+            f"자동 백업 설정을 저장했습니다.\n"
+            f"- 자동 백업: {'사용' if saved['enabled'] else '중지'}\n"
+            f"- 주기: {'변경 시마다 즉시' if saved['intervalMinutes'] == 0 else str(saved['intervalMinutes']) + '분'}\n"
+            f"- 최대 보관: {saved['keepCount']}개",
+        )
+
+    def backup_now(self) -> None:
+        keep = self.keep_spin.value()
+        created = c.create_route_backup(self.routes_path, self.backup_dir, keep_count=keep, force=True)
+        self.refresh_list()
+        if created:
+            QMessageBox.information(self, "백업 완료", f"현재 노선 DB를 백업했습니다.\n{created.name}")
+        else:
+            QMessageBox.information(self, "안내", "백업할 노선 파일이 아직 없습니다.")
+
+    def open_backup_dir(self) -> None:
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(self.backup_dir))
+
+    def _selected_item(self) -> dict | None:
+        row = self.table.currentRow()
+        return self._items[row] if 0 <= row < len(self._items) else None
+
+    def delete_selected(self) -> None:
+        item = self._selected_item()
+        if not item:
+            QMessageBox.information(self, "선택 확인", "삭제할 백업을 선택하세요.")
+            return
+        if QMessageBox.question(self, "백업 삭제", f"{item['savedAt']} 백업을 삭제할까요?") != QMessageBox.StandardButton.Yes:
+            return
+        item["path"].unlink(missing_ok=True)
+        self.refresh_list()
+
+    def restore_selected(self) -> None:
+        item = self._selected_item()
+        if not item:
+            QMessageBox.information(self, "선택 확인", "복원할 백업을 선택하세요.")
+            return
+        ans = QMessageBox.question(
+            self,
+            "노선 백업 복원",
+            f"{item['savedAt']} 백업({item['count']}개 노선)으로 복원할까요?\n"
+            "현재 노선 상태도 복원 직전 자동으로 백업됩니다.",
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            routes = c.restore_route_backup(item["path"], self.routes_path, self.backup_dir, keep_count=self.keep_spin.value())
+        except Exception as exc:
+            QMessageBox.critical(self, "복원 오류", str(exc))
+            return
+        if self.on_restored:
+            self.on_restored(routes)
+        self.refresh_list()
+        QMessageBox.information(self, "복원 완료", f"{len(routes)}개 노선을 복원했습니다.")
 
 
 def apply_theme(app: QApplication) -> None:

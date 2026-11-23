@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
@@ -493,9 +494,120 @@ def load_routes(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8")).get("routes", []) if path.exists() else []
 
 
-def save_routes(path: Path, routes: list[dict]) -> None:
-    path.write_text(json.dumps({"schema": "sabre-routes-v1", "routes": routes}, ensure_ascii=False, indent=2),
-                    encoding="utf-8")
+DEFAULT_BACKUP_CFG = {"enabled": True, "intervalMinutes": 0, "keepCount": 20}
+
+
+def normalize_backup_cfg(cfg: dict | None = None) -> dict:
+    src = cfg if isinstance(cfg, dict) else {}
+    enabled = bool(src.get("enabled", DEFAULT_BACKUP_CFG["enabled"]))
+    try:
+        interval = max(0, min(1440, int(src.get("intervalMinutes", DEFAULT_BACKUP_CFG["intervalMinutes"]))))
+    except (TypeError, ValueError):
+        interval = DEFAULT_BACKUP_CFG["intervalMinutes"]
+    try:
+        keep = max(1, min(200, int(src.get("keepCount", DEFAULT_BACKUP_CFG["keepCount"]))))
+    except (TypeError, ValueError):
+        keep = DEFAULT_BACKUP_CFG["keepCount"]
+    return {"enabled": enabled, "intervalMinutes": interval, "keepCount": keep}
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def _backup_files(backup_dir: Path) -> list[Path]:
+    if not backup_dir.exists():
+        return []
+    return sorted(backup_dir.glob("sabre-routes_*.json"), key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+
+
+def _prune_backups(backup_dir: Path, keep_count: int) -> None:
+    for old in _backup_files(backup_dir)[max(1, keep_count):]:
+        old.unlink(missing_ok=True)
+
+
+def create_route_backup(routes_path: Path, backup_dir: Path, keep_count: int = 20, force: bool = True) -> Path | None:
+    """현재 sabre-routes.json을 backups 폴더에 타임스탬프 파일로 백업한다."""
+    if not routes_path.exists():
+        return None
+    raw = routes_path.read_bytes()
+    existing = _backup_files(backup_dir)
+    if not force and existing:
+        try:
+            if existing[0].read_bytes() == raw:
+                return None
+        except OSError:
+            pass
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+    target = backup_dir / f"sabre-routes_{stamp}.json"
+    while target.exists():
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        target = backup_dir / f"sabre-routes_{stamp}.json"
+    _atomic_write_bytes(target, raw)
+    _prune_backups(backup_dir, keep_count)
+    return target
+
+
+def list_route_backups(backup_dir: Path) -> list[dict]:
+    items = []
+    for p in _backup_files(backup_dir):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            cnt = len(data.get("routes", [])) if isinstance(data, dict) else 0
+            ts = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            items.append({"path": p, "name": p.name, "savedAt": ts, "count": cnt})
+        except Exception:
+            continue
+    return items
+
+
+def restore_route_backup(backup_path: Path, routes_path: Path, backup_dir: Path, keep_count: int = 20) -> list[dict]:
+    data = json.loads(backup_path.read_text(encoding="utf-8"))
+    routes = data.get("routes") if isinstance(data, dict) else None
+    if not isinstance(routes, list):
+        raise ValueError("올바른 노선 백업 파일 형식이 아닙니다.")
+    if routes_path.exists():
+        create_route_backup(routes_path, backup_dir, keep_count=keep_count, force=False)
+    payload = json.dumps({"schema": "sabre-routes-v1", "routes": routes}, ensure_ascii=False, indent=2).encode("utf-8")
+    _atomic_write_bytes(routes_path, payload)
+    return routes
+
+
+def save_routes(
+    path: Path,
+    routes: list[dict],
+    backup_dir: Path | None = None,
+    backup_cfg: dict | None = None,
+) -> None:
+    payload = json.dumps({"schema": "sabre-routes-v1", "routes": routes}, ensure_ascii=False, indent=2).encode("utf-8")
+    if backup_dir is not None and path.exists():
+        cfg = normalize_backup_cfg(backup_cfg)
+        if cfg["enabled"]:
+            try:
+                prev = path.read_bytes()
+            except OSError:
+                prev = b""
+            if prev and prev != payload:
+                existing = _backup_files(backup_dir)
+                should_backup = True
+                if existing:
+                    if cfg["intervalMinutes"] > 0:
+                        age_sec = datetime.now().timestamp() - existing[0].stat().st_mtime
+                        if age_sec < cfg["intervalMinutes"] * 60:
+                            should_backup = False
+                    if should_backup:
+                        try:
+                            if existing[0].read_bytes() == prev:
+                                should_backup = False
+                        except OSError:
+                            pass
+                if should_backup:
+                    create_route_backup(path, backup_dir, keep_count=cfg["keepCount"], force=True)
+    _atomic_write_bytes(path, payload)
 
 
 CSV_COLUMNS = (

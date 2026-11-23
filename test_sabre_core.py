@@ -808,10 +808,10 @@ class CoreTest(unittest.TestCase):
             self.assertEqual([a.text() for a in gui.menuBar().actions()], ["파일", "설정", "도움말"])
             self.assertEqual((gui.max_action.text(), gui.max_action.shortcut().toString()), ("최대화", "Alt+Enter"))
             self.assertEqual((gui.quit_action.text(), gui.quit_action.shortcut().toString()), ("끝내기", "Ctrl+Q"))
-            self.assertEqual([a.text() for a in gui.settings_menu.actions()], ["로그인 정보", "엑셀 저장 경로", "조회 노선 관리"])
+            self.assertEqual([a.text() for a in gui.settings_menu.actions()], ["로그인 정보", "엑셀 저장 경로", "조회 노선 관리", "노선 백업 관리"])
             self.assertEqual(
                 [a.shortcut().toString() for a in gui.settings_menu.actions()],
-                ["Ctrl+L", "Ctrl+E", "Ctrl+R"],
+                ["Ctrl+L", "Ctrl+E", "Ctrl+R", "Ctrl+B"],
             )
             dlg = app_mod.LoginDialog(gui, saved_cfg={"agentId": "4028", "password": "secret", "pcc": "R4D8", "remember": True}, submit_label="저장")
             self.assertIn("4**8", dlg.saved_summary_text)
@@ -1444,6 +1444,7 @@ class CoreTest(unittest.TestCase):
                 gui.reset_buttons()
 
                 # 4) 2회차 실행 -> 팝업 없이 즉시 실행
+                gui.log_lines.append("이전 조회 로그\n")
                 gui.start_run()
                 for _ in range(30):
                     if len(worker_runs) >= 2:
@@ -1451,6 +1452,7 @@ class CoreTest(unittest.TestCase):
                     time.sleep(0.02)
                 self.assertEqual(len(dialog_calls), 2)
                 self.assertEqual(len(worker_runs), 2)
+                self.assertEqual(gui.log_lines, [])
                 gui.reset_buttons()
 
                 # 5) 저장된 경로가 접근 불가해진 경우 -> 조회 전 경고 후 재선택 팝업
@@ -1463,6 +1465,70 @@ class CoreTest(unittest.TestCase):
             finally:
                 app_mod.CONFIG_PATH, app_mod.ROUTES_PATH, app_mod.OutputPathDialog, QMessageBox.warning = orig_cfg, orig_rp, orig_dlg, orig_warn
                 gui.close()
+                qt_app.processEvents()
+
+    def test_route_auto_backup_settings_prune_and_restore(self):
+        import time
+        from PySide6.QtWidgets import QApplication
+        import sabre_app as app_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            rp = tmp / "sabre-routes.json"
+            bdir = tmp / "backups"
+            cfg_path = tmp / "sabre-config.json"
+
+            # 기본 설정 확인 (자동 백업 ON, 주기 0분=변경 시 즉시, 보관 20개)
+            cur = app_mod.get_backup_settings(path=cfg_path)
+            self.assertEqual(cur, {"enabled": True, "intervalMinutes": 0, "keepCount": 20})
+
+            r1 = [c.normalize_route({"origin": "ICN", "destination": "BKK", "airline": "LJ", "depFlight": "LJ001", "retFlight": "LJ002", "days": "3", "endDate": "2027-02-26"})]
+            r2 = r1 + [c.normalize_route({"origin": "ICN", "destination": "DAD", "airline": "KE", "depFlight": "KE457", "retFlight": "KE458", "days": "3", "endDate": "2027-10-31"})]
+            r3 = [r2[1]]
+
+            # 최초 저장은 이전 파일이 없으므로 백업 없음
+            c.save_routes(rp, r1, backup_dir=bdir, backup_cfg=cur)
+            self.assertEqual(len(c.list_route_backups(bdir)), 0)
+
+            # 동일 내용 저장 시 중복 백업 생성 안 함
+            c.save_routes(rp, r1, backup_dir=bdir, backup_cfg=cur)
+            self.assertEqual(len(c.list_route_backups(bdir)), 0)
+
+            # 변경 저장 시 직전 원본(r1) 자동 백업
+            c.save_routes(rp, r2, backup_dir=bdir, backup_cfg=cur)
+            bks = c.list_route_backups(bdir)
+            self.assertEqual(len(bks), 1)
+            self.assertEqual(bks[0]["count"], 1)
+
+            # 주기 제한(60분) 설정 시 바로 재저장해도 추가 백업 스킵
+            throttled = app_mod.save_backup_settings({"enabled": True, "intervalMinutes": 60, "keepCount": 2}, path=cfg_path)
+            c.save_routes(rp, r3, backup_dir=bdir, backup_cfg=throttled)
+            self.assertEqual(len(c.list_route_backups(bdir)), 1)
+
+            # 주기 0 + 보관 개수 2개 설정 -> 초과분 자동 정리
+            time.sleep(0.02)
+            imm2 = app_mod.save_backup_settings({"enabled": True, "intervalMinutes": 0, "keepCount": 2}, path=cfg_path)
+            c.save_routes(rp, r2, backup_dir=bdir, backup_cfg=imm2)
+            time.sleep(0.02)
+            c.save_routes(rp, r1, backup_dir=bdir, backup_cfg=imm2)
+            bks = c.list_route_backups(bdir)
+            self.assertEqual(len(bks), 2)
+
+            # 2개 노선이 들어 있던 백업으로 복원 -> 현재 상태 안전 백업 + 복원 확인
+            target_bk = next(b for b in bks if b["count"] == 2)
+            restored = c.restore_route_backup(target_bk["path"], rp, bdir, keep_count=5)
+            self.assertEqual(len(restored), 2)
+            self.assertEqual(len(c.load_routes(rp)), 2)
+
+            # RouteBackupDialog UI 초기화 및 설정 바인딩 확인
+            qt_app = QApplication.instance() or QApplication([])
+            dlg = app_mod.RouteBackupDialog(None, rp, bdir, cfg_path)
+            try:
+                self.assertTrue(dlg.enabled_chk.isChecked())
+                self.assertEqual((dlg.interval_spin.value(), dlg.keep_spin.value()), (0, 2))
+                self.assertGreaterEqual(dlg.table.rowCount(), 2)
+            finally:
+                dlg.close()
                 qt_app.processEvents()
 
 
