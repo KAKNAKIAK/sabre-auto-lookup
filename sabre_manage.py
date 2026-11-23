@@ -114,6 +114,7 @@ class ManageWindow(QDialog):
         self.resize(w, h)
         self.edit_state: dict | None = None
         self._row_base_bg: dict[int, QBrush] = {}
+        self._toggle_clear_cell: tuple[int, int] | None = None
         self._probe_stop = threading.Event()
         self._probe_running = False
         self.probe_status_signal.connect(self._on_probe_status)
@@ -222,12 +223,32 @@ class ManageWindow(QDialog):
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if obj is self.table.viewport():
             etype = event.type()
-            if etype == QEvent.Type.MouseButtonPress and self.edit_state:
-                clicked_row = self.table.rowAt(event.position().toPoint().y())
-                if clicked_row != self.edit_state["row"]:
-                    if not self.commit_row_edit():
+            if etype == QEvent.Type.MouseButtonPress:
+                pos = event.position().toPoint()
+                clicked_row, clicked_col = self.table.rowAt(pos.y()), self.table.columnAt(pos.x())
+                self._toggle_clear_cell = None
+                if self.edit_state:
+                    if clicked_row != self.edit_state["row"]:
+                        if not self.commit_row_edit():
+                            return True
+                elif event.button() == Qt.MouseButton.LeftButton and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+                    if clicked_row < 0:
+                        self._clear_table_selection()
                         return True
+                    if clicked_row in self._selected_visual_rows():
+                        self._toggle_clear_cell = (clicked_row, clicked_col)
+            elif etype == QEvent.Type.MouseButtonRelease:
+                if self._toggle_clear_cell is not None and not self.edit_state:
+                    pos = event.position().toPoint()
+                    rel_cell = (self.table.rowAt(pos.y()), self.table.columnAt(pos.x()))
+                    cand = self._toggle_clear_cell
+                    self._toggle_clear_cell = None
+                    if rel_cell == cand and len(self.table.selectedIndexes()) <= 1:
+                        self._clear_table_selection()
+                        return True
+                self._toggle_clear_cell = None
             elif etype == QEvent.Type.MouseButtonDblClick:
+                self._toggle_clear_cell = None
                 pos = event.position().toPoint()
                 real_row, real_col = self.table.rowAt(pos.y()), self.table.columnAt(pos.x())
                 if real_row >= 0:
@@ -238,8 +259,7 @@ class ManageWindow(QDialog):
             if etype == QEvent.Type.MouseButtonPress:
                 if self.edit_state and not self.commit_row_edit():
                     return True
-                self.table.clearSelection()
-                self.table.setCurrentCell(-1, -1)
+                self._clear_table_selection()
                 self.blank_zone.setFocus()
             elif etype == QEvent.Type.Wheel:
                 sb = self.table.verticalScrollBar()
@@ -252,6 +272,26 @@ class ManageWindow(QDialog):
             return None
         item = self.table.item(row, 0)
         return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+
+    def _clear_table_selection(self) -> None:
+        self.table.clearSelection()
+        self.table.setCurrentCell(-1, -1)
+        self._update_row_highlight()
+
+    def _selected_visual_rows(self) -> set[int]:
+        sel_indexes = self.table.selectedIndexes()
+        active_rows = {idx.row() for idx in sel_indexes}
+        for idx in sel_indexes:
+            if idx.column() == 0:
+                span = self.table.rowSpan(idx.row(), 0)
+                if span > 1:
+                    active_rows.update(range(idx.row(), idx.row() + span))
+        cur_r, cur_c = self.table.currentRow(), self.table.currentColumn()
+        if not active_rows and cur_r >= 0:
+            active_rows.add(cur_r)
+            if cur_c == 0 and self.table.rowSpan(cur_r, 0) > 1:
+                active_rows.update(range(cur_r, cur_r + self.table.rowSpan(cur_r, 0)))
+        return active_rows
 
     def refresh_table(self) -> None:
         self.cancel_row_edit()
@@ -327,18 +367,7 @@ class ManageWindow(QDialog):
         self._update_row_highlight()
 
     def _update_row_highlight(self) -> None:
-        sel_indexes = self.table.selectedIndexes()
-        active_rows = {idx.row() for idx in sel_indexes}
-        for idx in sel_indexes:
-            if idx.column() == 0:
-                span = self.table.rowSpan(idx.row(), 0)
-                if span > 1:
-                    active_rows.update(range(idx.row(), idx.row() + span))
-        cur_r, cur_c = self.table.currentRow(), self.table.currentColumn()
-        if not active_rows and cur_r >= 0:
-            active_rows.add(cur_r)
-            if cur_c == 0 and self.table.rowSpan(cur_r, 0) > 1:
-                active_rows.update(range(cur_r, cur_r + self.table.rowSpan(cur_r, 0)))
+        active_rows = self._selected_visual_rows()
         hl_bg = QBrush(QColor("#fee2e2"))
         hl_fg = QBrush(QColor("#991b1b"))
         base_fg = QBrush(QColor("#0f172a"))
@@ -741,7 +770,7 @@ class ManageWindow(QDialog):
         if explicit_indices is not None:
             indices = [i for i in explicit_indices if i is not None and 0 <= i < len(self.app.routes)]
         else:
-            sel_rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
+            sel_rows = sorted(self._selected_visual_rows())
             indices = []
             for r in sel_rows:
                 ri = self._row_route_index(r)

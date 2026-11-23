@@ -753,6 +753,24 @@ class CoreTest(unittest.TestCase):
             gui.open_manage_window()
             self.assertEqual([c.route_group(r) for r in gui.routes], ["ICN-TAO-KE", "ICN-DAD-KE", "ICN-BKK-LCC"])
             self.assertEqual(list(gui.group_cards.keys()), ["ICN-TAO-KE", "ICN-DAD-KE", "ICN-BKK-LCC"])
+            # 강조된 행을 한 번 더 좌클릭하면 선택 해제되어 원래 배경색으로 복원
+            from PySide6.QtCore import QEvent, QPointF
+            from PySide6.QtGui import QMouseEvent
+            mgr2 = gui.manage_win
+            mgr2.show()
+            qt_app.processEvents()
+            mgr2.table.setCurrentCell(0, 1)
+            mgr2._update_row_highlight()
+            self.assertEqual(mgr2._selected_visual_rows(), {0})
+            self.assertEqual(mgr2.table.item(0, 1).background().color().name().lower(), "#fee2e2")
+            rect = mgr2.table.visualItemRect(mgr2.table.item(0, 1))
+            pt = QPointF(rect.center())
+            press = QMouseEvent(QEvent.Type.MouseButtonPress, pt, pt, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+            rel = QMouseEvent(QEvent.Type.MouseButtonRelease, pt, pt, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+            mgr2.eventFilter(mgr2.table.viewport(), press)
+            mgr2.eventFilter(mgr2.table.viewport(), rel)
+            self.assertEqual(mgr2._selected_visual_rows(), set())
+            self.assertNotEqual(mgr2.table.item(0, 1).background().color().name().lower(), "#fee2e2")
             gui.manage_win.close()
 
         self._run_with_gui(seed, body)
