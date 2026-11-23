@@ -6,3 +6,6 @@ backup_*/
 *.xlsx
 *.log
 *.tmp
+build/
+dist/
+release/

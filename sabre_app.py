@@ -4,26 +4,28 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import ctypes
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QProgressDialog,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 import sabre_core as c
 import sabre_terminal as t
+import sabre_updater as u
 from sabre_manage import InlineComboBox, InlineLineEdit, ManageWindow
 from sabre_ui import (
     APP_QSS, BASE_DIR, COL_WIDTHS, CONFIG_PATH, CRED_KEYS, ENABLED_CHOICES,
     FARE_CHOICES, FIELDS, MANAGE_COLS, MANAGE_HEADERS, ROUTES_PATH, SEARCH_KEYS,
     EndDatePreviewDialog, LoginDialog, LogWindow, OutputPathDialog, SingleDateResultDialog,
     add_months, apply_theme, bind_alt_enter, clear_remembered_login,
-    format_date_edit, get_output_root, has_saved_login, mask_secret,
+    format_date_edit, get_output_root, has_saved_login, load_app_icon, mask_secret,
     matches_route_query, read_config, save_login_config, save_output_root,
     show, toggle_window_maximize,
 )
@@ -34,10 +36,16 @@ class App(QMainWindow):
     login_done_signal = Signal()
     run_done_signal = Signal()
     single_date_done_signal = Signal(str, str)
+    update_check_done_signal = Signal(bool, object, str)
+    update_dl_progress_signal = Signal(int, int)
+    update_dl_done_signal = Signal(object, str)
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("세이버자동조회 (Sabre 실시간 운임)")
+        self.setWindowTitle(f"항공운임 조회 (SABRE VER.) {u.APP_VERSION}")
+        icon = load_app_icon()
+        if not icon.isNull():
+            self.setWindowIcon(icon)
         self.resize(1120, 640)
         self.stop = threading.Event()
         self.routes = c.load_routes(ROUTES_PATH)
@@ -48,6 +56,8 @@ class App(QMainWindow):
         self.single_result_win: SingleDateResultDialog | None = None
         self._end_autofilled = False
         self._running = False
+        self._update_checking = False
+        self._update_dl_dlg: QProgressDialog | None = None
         self.group_cards: dict[str, tuple[QFrame, QPushButton]] = {}
         self.job_entries: list[tuple[str, QCheckBox, dict, int]] = []
 
@@ -55,26 +65,47 @@ class App(QMainWindow):
         self.login_done_signal.connect(lambda: self.login_btn.setEnabled(True))
         self.run_done_signal.connect(self.reset_buttons)
         self.single_date_done_signal.connect(self._show_single_date_result)
+        self.update_check_done_signal.connect(self._on_update_check_done)
+        self.update_dl_progress_signal.connect(self._on_update_dl_progress)
+        self.update_dl_done_signal.connect(self._on_update_dl_done)
 
         self.build_menu()
         self.build_auto()
-        bind_alt_enter(self)
         self.refresh_jobs()
+        if os.environ.get("SABRE_NO_UPDATE_CHECK") != "1" and "unittest" not in sys.modules:
+            QTimer.singleShot(1500, lambda: self.check_for_updates(manual=False))
 
     def build_menu(self) -> None:
         mb = self.menuBar()
         self.file_menu = mb.addMenu("파일")
+        self.max_action = QAction("최대화", self)
+        self.max_action.setShortcuts([QKeySequence("Alt+Enter"), QKeySequence("Alt+Return")])
+        self.max_action.triggered.connect(lambda: toggle_window_maximize(self))
+        self.file_menu.addAction(self.max_action)
+        self.file_menu.addSeparator()
         self.quit_action = QAction("끝내기", self)
         self.quit_action.setShortcut(QKeySequence("Ctrl+Q"))
         self.quit_action.triggered.connect(self.quit_app)
         self.file_menu.addAction(self.quit_action)
 
         self.settings_menu = mb.addMenu("설정")
-        self.settings_menu.addAction("로그인 정보", self.open_login_settings)
-        self.settings_menu.addAction("엑셀 저장 경로", self.open_output_dir_settings)
-        self.settings_menu.addAction("조회 노선 관리", self.open_manage_window)
+        self.login_settings_action = QAction("로그인 정보", self)
+        self.login_settings_action.setShortcut(QKeySequence("Ctrl+L"))
+        self.login_settings_action.triggered.connect(self.open_login_settings)
+        self.settings_menu.addAction(self.login_settings_action)
+
+        self.output_dir_action = QAction("엑셀 저장 경로", self)
+        self.output_dir_action.setShortcut(QKeySequence("Ctrl+E"))
+        self.output_dir_action.triggered.connect(self.open_output_dir_settings)
+        self.settings_menu.addAction(self.output_dir_action)
+
+        self.manage_routes_action = QAction("조회 노선 관리", self)
+        self.manage_routes_action.setShortcut(QKeySequence("Ctrl+R"))
+        self.manage_routes_action.triggered.connect(self.open_manage_window)
+        self.settings_menu.addAction(self.manage_routes_action)
 
         self.help_menu = mb.addMenu("도움말")
+        self.help_menu.addAction("업데이트 확인", lambda: self.check_for_updates(manual=True))
         self.help_menu.addAction("사용 안내", self.show_help)
 
     def build_auto(self) -> None:
@@ -325,15 +356,129 @@ class App(QMainWindow):
         QMessageBox.information(
             self,
             "도움말",
-            "세이버자동조회 주요 조작\n\n"
-            "• Ctrl+Q : 프로그램 끝내기\n"
+            f"항공운임 조회 (SABRE VER.) {u.APP_VERSION} 주요 조작\n\n"
             "• Alt+Enter : 창 최대화 / 원래 크기 전환\n"
-            "• 설정 > 조회 노선 관리 : 노선 추가·수정·복사·삭제·검색·CSV\n"
+            "• Ctrl+Q : 프로그램 끝내기\n"
+            "• Ctrl+L : 로그인 정보 설정\n"
+            "• Ctrl+E : 엑셀 저장 경로 설정\n"
+            "• Ctrl+R : 조회 노선 관리 (추가·수정·복사·삭제·검색·CSV)\n"
             "• 노선 행 더블클릭 / F2 : 인라인 수정 (Enter 저장 / Esc 취소)\n"
             "• 노선 관리 Ctrl+C / Ctrl+V : 셀 복사 / 붙여넣기 (여러 셀 일괄 붙여넣기)\n"
             "• 텍스트 칸 ↑ / ↓ : 칸 내 맨 앞 / 맨 끝 커서 이동\n"
-            "• 빈칸 우클릭 : 노선 추가  |  노선 행 우클릭 : 복사 / 삭제",
+            "• 빈칸 우클릭 : 노선 추가  |  노선 행 우클릭 : 복사 / 삭제\n"
+            "• 도움말 > 업데이트 확인 : GitHub 릴리즈 최신 버전 확인 및 자동 설치",
         )
+
+    def check_for_updates(self, manual: bool = True) -> None:
+        if self._update_checking:
+            return
+        if self._running and manual:
+            QMessageBox.information(self, "조회 실행 중", "조회 작업이 끝난 뒤 업데이트를 확인하세요.")
+            return
+        self._update_checking = True
+        if manual:
+            self.log(f"현재 버전 {u.APP_VERSION} - GitHub 릴리즈 최신 버전 확인 중...")
+
+        def worker() -> None:
+            try:
+                rel = u.fetch_available_update(
+                    current_version=u.APP_VERSION,
+                    cfg=read_config(CONFIG_PATH),
+                    timeout=8.0 if manual else 5.0,
+                )
+                self.update_check_done_signal.emit(manual, rel, "")
+            except Exception as exc:
+                self.update_check_done_signal.emit(manual, None, str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_check_done(self, manual: bool, release: object, err: str) -> None:
+        self._update_checking = False
+        if err:
+            if manual:
+                self.log(f"업데이트 확인 실패: {err}")
+                QMessageBox.warning(self, "업데이트 확인 실패", err)
+            return
+        if not isinstance(release, dict):
+            if manual:
+                self.log(f"최신 버전({u.APP_VERSION}) 사용 중")
+                QMessageBox.information(self, "업데이트 확인", f"현재 최신 버전({u.APP_VERSION})을 사용 중입니다.")
+            return
+        if self._running:
+            return
+
+        ver = release.get("version", "최신 버전")
+        raw_notes = str(release.get("release_notes") or "").strip()
+        notes_lines = [ln for ln in raw_notes.splitlines() if "sha256:" not in ln.lower()]
+        notes = "\n".join(notes_lines).strip() or "새 버전이 출시되었습니다."
+        msg = (
+            f"새 버전({ver})이 출시되었습니다. (현재: {u.APP_VERSION})\n\n"
+            f"{notes[:500]}\n\n"
+            "지금 다운로드하여 업데이트를 적용할까요?"
+        )
+        if QMessageBox.question(
+            self,
+            "업데이트 알림",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self._start_update_download(release)
+
+    def _start_update_download(self, release: dict) -> None:
+        ver = release.get("version", "")
+        self.log(f"새 버전 {ver} 설치 파일 다운로드 시작...")
+        dlg = QProgressDialog(f"새 버전({ver}) 다운로드 중...", "", 0, 100, self)
+        dlg.setWindowTitle("자동 업데이트")
+        dlg.setCancelButton(None)
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setValue(0)
+        dlg.show()
+        self._update_dl_dlg = dlg
+
+        def worker() -> None:
+            try:
+                path = u.download_installer(
+                    release,
+                    progress_cb=lambda done, tot: self.update_dl_progress_signal.emit(done, tot),
+                )
+                self.update_dl_done_signal.emit(path, "")
+            except Exception as exc:
+                self.update_dl_done_signal.emit(None, str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_dl_progress(self, done: int, total: int) -> None:
+        if self._update_dl_dlg is None:
+            return
+        if total > 0:
+            pct = min(100, int(done * 100 / total))
+            self._update_dl_dlg.setRange(0, 100)
+            self._update_dl_dlg.setValue(pct)
+            self._update_dl_dlg.setLabelText(
+                f"업데이트 다운로드 중... {done / (1024 * 1024):.1f} / {total / (1024 * 1024):.1f} MB ({pct}%)"
+            )
+        else:
+            self._update_dl_dlg.setRange(0, 0)
+            self._update_dl_dlg.setLabelText(f"업데이트 다운로드 중... {done / (1024 * 1024):.1f} MB")
+
+    def _on_update_dl_done(self, installer_path: object, err: str) -> None:
+        if self._update_dl_dlg is not None:
+            self._update_dl_dlg.close()
+            self._update_dl_dlg = None
+        if err or not isinstance(installer_path, Path):
+            self.log(f"업데이트 다운로드 실패: {err}")
+            QMessageBox.critical(self, "업데이트 실패", err or "설치 파일 다운로드에 실패했습니다.")
+            return
+        self.log(f"다운로드 완료: {installer_path} -> 설치 프로그램 실행")
+        try:
+            target_dir = BASE_DIR if getattr(sys, "frozen", False) else None
+            u.launch_installer(installer_path, update_dir=target_dir)
+            self.quit_app()
+        except Exception as exc:
+            QMessageBox.critical(self, "업데이트 실행 실패", str(exc))
 
     def quit_app(self) -> None:
         self.stop.set()
@@ -699,8 +844,16 @@ class App(QMainWindow):
 
 
 def main() -> None:
+    if os.name == "nt":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("NaeilTour.SabreAutoLookup")
+        except Exception:
+            pass
     app = QApplication(sys.argv)
     apply_theme(app)
+    icon = load_app_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     win = App()
     win.show()
     sys.exit(app.exec())

@@ -788,8 +788,13 @@ class CoreTest(unittest.TestCase):
             app_mod.toggle_window_maximize(gui)
             self.assertFalse(gui.isMaximized())
             self.assertEqual([a.text() for a in gui.menuBar().actions()], ["파일", "설정", "도움말"])
+            self.assertEqual((gui.max_action.text(), gui.max_action.shortcut().toString()), ("최대화", "Alt+Enter"))
             self.assertEqual((gui.quit_action.text(), gui.quit_action.shortcut().toString()), ("끝내기", "Ctrl+Q"))
             self.assertEqual([a.text() for a in gui.settings_menu.actions()], ["로그인 정보", "엑셀 저장 경로", "조회 노선 관리"])
+            self.assertEqual(
+                [a.shortcut().toString() for a in gui.settings_menu.actions()],
+                ["Ctrl+L", "Ctrl+E", "Ctrl+R"],
+            )
             dlg = app_mod.LoginDialog(gui, saved_cfg={"agentId": "4028", "password": "secret", "pcc": "R4D8", "remember": True}, submit_label="저장")
             self.assertIn("4**8", dlg.saved_summary_text)
             self.assertIn("******", dlg.saved_summary_text)
@@ -1210,6 +1215,128 @@ class CoreTest(unittest.TestCase):
                 app_mod.CONFIG_PATH, app_mod.LoginDialog, t.launch_and_login = orig_cfg, orig_dlg, orig_launch
                 gui.close()
                 qt_app.processEvents()
+
+    def test_updater_release_sha256_and_installer_preserve(self):
+        import hashlib
+        import importlib.util
+        import io
+        import json
+        import zipfile
+        import sabre_updater as u
+
+        inst_path = Path(__file__).resolve().parent / "packaging" / "setup_installer.py"
+        spec = importlib.util.spec_from_file_location("sabre_setup_installer", inst_path)
+        inst = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inst)
+
+        self.assertTrue(u.is_newer_version("v1.0.1", "v1.0.0"))
+        self.assertTrue(u.is_newer_version("v1.2.0", "v1.1.9"))
+        self.assertFalse(u.is_newer_version("v1.0.0", "v1.0.0"))
+        self.assertFalse(u.is_newer_version("v0.9.9", "v1.0.0"))
+
+        fake_bin = b"MZ-FAKE-SABRE-SETUP-PAYLOAD"
+        good_sha = hashlib.sha256(fake_bin).hexdigest()
+        release_json = json.dumps({
+            "tag_name": "v1.1.0",
+            "body": f"버그 수정 및 속도 개선\n\nSHA256: {good_sha}",
+            "assets": [{
+                "name": "SabreAutoLookup_Setup_v1.1.0.exe",
+                "browser_download_url": "https://example.invalid/SabreAutoLookup_Setup_v1.1.0.exe",
+                "url": "https://api.github.com/repos/KAKNAKIAK/sabre-auto-lookup/releases/assets/99",
+            }],
+        }).encode("utf-8")
+
+        seen_reqs = []
+
+        class _Resp(io.BytesIO):
+            def __init__(self, data: bytes):
+                super().__init__(data)
+                self.headers = {"Content-Length": str(len(data))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+        def fake_urlopen(req, timeout=8.0):
+            seen_reqs.append((req.full_url, dict(req.header_items())))
+            if req.full_url.endswith("/releases/latest"):
+                return _Resp(release_json)
+            return _Resp(fake_bin)
+
+        orig_open = u.urllib.request.urlopen
+        try:
+            u.urllib.request.urlopen = fake_urlopen
+            rel = u.fetch_available_update("v1.0.0", cfg={"githubToken": "tok-test"})
+            self.assertIsNotNone(rel)
+            self.assertEqual(rel["version"], "v1.1.0")
+            self.assertEqual(rel["sha256"], good_sha)
+
+            dl = u.download_installer(rel)
+            try:
+                self.assertEqual(dl.read_bytes(), fake_bin)
+                # 토큰이 있을 때 비공개 릴리즈 호환을 위해 asset API URL + octet-stream 헤더를 사용한다.
+                self.assertEqual(seen_reqs[-1][0], "https://api.github.com/repos/KAKNAKIAK/sabre-auto-lookup/releases/assets/99")
+                self.assertEqual(seen_reqs[-1][1].get("Accept"), "application/octet-stream")
+                self.assertEqual(seen_reqs[-1][1].get("Authorization"), "Bearer tok-test")
+            finally:
+                dl.unlink(missing_ok=True)
+
+            bad_rel = {**rel, "sha256": "0" * 64}
+            with self.assertRaises(u.UpdateError):
+                u.download_installer(bad_rel)
+        finally:
+            u.urllib.request.urlopen = orig_open
+
+        # 셋업 인스톨러 payload 압축 해제: 기존 설정/노선은 보존, EXE는 교체
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            zpath = root / "payload.zip"
+            with zipfile.ZipFile(zpath, "w") as zf:
+                zf.writestr(inst.APP_EXE_NAME, b"NEW-EXE")
+                zf.writestr("sabre-routes.json", '[{"routeGroup":"SEED"}]')
+                zf.writestr("assets/sabre_icon.ico", b"ICO")
+
+            inst_dir = root / "installed"
+            inst_dir.mkdir()
+            (inst_dir / inst.APP_EXE_NAME).write_bytes(b"OLD-EXE")
+            (inst_dir / "sabre-routes.json").write_text('[{"routeGroup":"USER"}]', encoding="utf-8")
+            (inst_dir / "sabre-config.json").write_text('{"agentId":"ME"}', encoding="utf-8")
+
+            exe = inst.install_payload(zpath, inst_dir)
+            self.assertEqual(exe.read_bytes(), b"NEW-EXE")
+            self.assertIn("USER", (inst_dir / "sabre-routes.json").read_text(encoding="utf-8"))
+            self.assertIn("ME", (inst_dir / "sabre-config.json").read_text(encoding="utf-8"))
+            self.assertTrue((inst_dir / "assets" / "sabre_icon.ico").exists())
+
+            fresh_dir = root / "fresh"
+            inst.install_payload(zpath, fresh_dir)
+            self.assertIn("SEED", (fresh_dir / "sabre-routes.json").read_text(encoding="utf-8"))
+            self.assertEqual(inst._parse_update_dir(["--update", str(inst_dir)]), inst_dir.resolve())
+
+            # 빈 노선 DB 스키마 및 동봉 예시 CSV 검증
+            empty_db = root / "empty-routes.json"
+            empty_db.write_text('{"schema": "sabre-routes-v1", "routes": []}\n', encoding="utf-8")
+            self.assertEqual(c.load_routes(empty_db), [])
+            sample_csv = Path(__file__).resolve().parent / "sabre-routes.example.csv"
+            self.assertTrue(sample_csv.exists())
+            self.assertGreater(len(c.import_routes_csv(sample_csv)), 0)
+
+        # 앱 아이콘 및 도움말 > 업데이트 확인 메뉴 확인
+        import sabre_app as app_mod
+        from PySide6.QtWidgets import QApplication
+        qt_app = QApplication.instance() or QApplication([])
+        gui = app_mod.App()
+        try:
+            self.assertIn("항공운임 조회 (SABRE VER.)", gui.windowTitle())
+            self.assertIn(u.APP_VERSION, gui.windowTitle())
+            self.assertFalse(gui.windowIcon().isNull())
+            help_labels = [a.text() for a in gui.help_menu.actions()]
+            self.assertIn("업데이트 확인", help_labels)
+        finally:
+            gui.close()
+            qt_app.processEvents()
 
 
 if __name__ == "__main__":

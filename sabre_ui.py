@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QFileDialog, QFormLayout,
     QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
@@ -21,6 +21,23 @@ import sabre_core as c
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 ROUTES_PATH = BASE_DIR / "sabre-routes.json"
 CONFIG_PATH = BASE_DIR / "sabre-config.json"
+
+
+def get_asset_path(name: str) -> Path:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = Path(meipass) / "assets" / name
+        if bundled.exists():
+            return bundled
+    return BASE_DIR / "assets" / name
+
+
+def load_app_icon() -> QIcon:
+    for name in ("sabre_icon.ico", "sabre_icon.png"):
+        p = get_asset_path(name)
+        if p.exists():
+            return QIcon(str(p))
+    return QIcon()
 CRED_KEYS = ("agentId", "password", "pcc")
 FIELDS = (
     ("노선그룹", "routeGroup"),
