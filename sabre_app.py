@@ -21,7 +21,7 @@ from sabre_manage import InlineComboBox, InlineLineEdit, ManageWindow
 from sabre_ui import (
     APP_QSS, BASE_DIR, COL_WIDTHS, CONFIG_PATH, CRED_KEYS, ENABLED_CHOICES,
     FARE_CHOICES, FIELDS, MANAGE_COLS, MANAGE_HEADERS, ROUTES_PATH, SEARCH_KEYS,
-    LoginDialog, LogWindow, OutputPathDialog, SingleDateResultDialog,
+    EndDatePreviewDialog, LoginDialog, LogWindow, OutputPathDialog, SingleDateResultDialog,
     add_months, apply_theme, bind_alt_enter, clear_remembered_login,
     format_date_edit, get_output_root, has_saved_login, mask_secret,
     matches_route_query, read_config, save_login_config, save_output_root,
@@ -47,6 +47,7 @@ class App(QMainWindow):
         self.manage_win: ManageWindow | None = None
         self.single_result_win: SingleDateResultDialog | None = None
         self._end_autofilled = False
+        self._running = False
         self.group_cards: dict[str, tuple[QFrame, QPushButton]] = {}
         self.job_entries: list[tuple[str, QCheckBox, dict, int]] = []
 
@@ -93,7 +94,7 @@ class App(QMainWindow):
         self.start_lbl.setObjectName("FieldLabel")
         self.start_edit = QLineEdit((date.today() + timedelta(3)).isoformat())
         self.start_edit.setFixedWidth(106)
-        self.start_edit.editingFinished.connect(lambda: format_date_edit(self.start_edit))
+        self.start_edit.editingFinished.connect(self._on_main_start_finished)
         self.end_lbl = QLabel("종료일")
         self.end_lbl.setObjectName("FieldLabel")
         self.end_edit = QLineEdit()
@@ -107,11 +108,7 @@ class App(QMainWindow):
         self.single_date_chk.toggled.connect(self.on_single_date_toggle)
         self.run_btn = QPushButton("▶ 조회 시작")
         self.run_btn.setObjectName("PrimaryBtn")
-        self.run_btn.clicked.connect(self.start_run)
-        self.stop_btn = QPushButton("■ 정지")
-        self.stop_btn.setObjectName("DangerBtn")
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.stop.set)
+        self.run_btn.clicked.connect(self.on_run_button_click)
 
         tb_lay.addWidget(self.start_lbl)
         tb_lay.addWidget(self.start_edit)
@@ -138,7 +135,6 @@ class App(QMainWindow):
         tb_lay.addWidget(self.login_btn)
         tb_lay.addWidget(self.single_date_chk)
         tb_lay.addWidget(self.run_btn)
-        tb_lay.addWidget(self.stop_btn)
         root_lay.addWidget(toolbar)
 
         panel = QFrame()
@@ -254,6 +250,11 @@ class App(QMainWindow):
         out_root.mkdir(parents=True, exist_ok=True)
         os.startfile(str(out_root))
 
+    def _on_main_start_finished(self) -> None:
+        format_date_edit(self.start_edit)
+        if self.manage_win is not None and self.manage_win.isVisible() and not self.manage_win.edit_state:
+            self.manage_win.refresh_table()
+
     def set_end_preset(self, months: int) -> None:
         try:
             start = date.fromisoformat(format_date_edit(self.start_edit))
@@ -282,8 +283,6 @@ class App(QMainWindow):
                 btn.setVisible(False)
             self.single_pax_lbl.setVisible(True)
             self.single_pax_edit.setVisible(True)
-            self.run_btn.setText("▶ 최저가 확인")
-            self.run_btn.setObjectName("SuccessBtn")
         else:
             self.start_lbl.setText("시작일")
             self.end_lbl.setText("종료일")
@@ -295,11 +294,32 @@ class App(QMainWindow):
                 btn.setVisible(True)
             self.single_pax_lbl.setVisible(False)
             self.single_pax_edit.setVisible(False)
+        self._refresh_run_button()
+        self.filter_job_cards()
+
+    def _refresh_run_button(self) -> None:
+        if self._running:
+            self.run_btn.setText("정지 중..." if self.stop.is_set() else "■ 정지")
+            self.run_btn.setObjectName("DangerBtn")
+            self.run_btn.setEnabled(not self.stop.is_set())
+        elif self.single_date_chk.isChecked():
+            self.run_btn.setText("▶ 최저가 확인")
+            self.run_btn.setObjectName("SuccessBtn")
+            self.run_btn.setEnabled(True)
+        else:
             self.run_btn.setText("▶ 조회 시작")
             self.run_btn.setObjectName("PrimaryBtn")
+            self.run_btn.setEnabled(True)
+        self.single_date_chk.setEnabled(not self._running)
         self.run_btn.style().unpolish(self.run_btn)
         self.run_btn.style().polish(self.run_btn)
-        self.filter_job_cards()
+
+    def on_run_button_click(self) -> None:
+        if self._running:
+            self.stop.set()
+            self._refresh_run_button()
+            return
+        self.start_run()
 
     def show_help(self) -> None:
         QMessageBox.information(
@@ -534,9 +554,7 @@ class App(QMainWindow):
                 if key not in seen_routes:
                     seen_routes.add(key)
                     planned.append(({**r, "pax": single_pax}, span_days, start, end))
-            self.stop.clear()
-            self.run_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
+            self._begin_running()
             threading.Thread(target=self.single_date_worker, args=(planned, start, end, single_pax), daemon=True).start()
             return
         planned, issues = c.plan_jobs(jobs, start, end)
@@ -557,10 +575,13 @@ class App(QMainWindow):
             )
             if ans != QMessageBox.StandardButton.Yes:
                 return
-        self.stop.clear()
-        self.run_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        self._begin_running()
         threading.Thread(target=self.worker, args=(planned,), daemon=True).start()
+
+    def _begin_running(self) -> None:
+        self.stop.clear()
+        self._running = True
+        self._refresh_run_button()
 
     def single_date_worker(self, planned: list[tuple[dict, int, date, date]], dep_date: date, arr_date: date, pax: int = 1) -> None:
         cfg = self.load_cfg()
@@ -640,8 +661,8 @@ class App(QMainWindow):
         self.run_done_signal.emit()
 
     def reset_buttons(self) -> None:
-        self.run_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self._running = False
+        self._refresh_run_button()
 
     def log(self, msg: str, progress=None) -> None:
         self.log_signal.emit(msg, progress)

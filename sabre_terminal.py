@@ -135,6 +135,20 @@ class Terminal(Page):
             term.close()
             raise SessionExpired("Sabre 명령 입력창이 없어 재로그인이 필요합니다.")
         has_tpl = bool(term.eval(ARM_API_JS)) if prefer_api else False
+        # 이미 API 템플릿이 캡처된 최소화 창에서는 UI 포커스 없이 api_cmd("I")로 즉시 생존을 확인한다.
+        out = ""
+        if prefer_api and has_tpl:
+            try:
+                out = term.api_cmd("I")
+                if "IGD" in out.upper():
+                    term.mode = "API"
+                    return term
+            except SessionExpired:
+                term.close()
+                raise
+            except Exception:
+                term.eval("window.__sfTpl=null")
+                has_tpl = False
         # 기존 탭 재사용 시 실제 터미널 생존(I -> IGD)과 API 템플릿 캡처를 동시에 검증한다.
         try:
             out = term.ui_cmd("I", timeout=15.0)
@@ -551,10 +565,219 @@ def run_single_date(planned: list[tuple[dict, int, date, date]], log, stop: thre
         term.close()
 
 
+def discover_last_end_dates(
+    targets: list[tuple[int, dict]],
+    all_routes: list[dict],
+    today: date,
+    log,
+    stop: threading.Event,
+    background: bool = True,
+    cfg: dict | None = None,
+    horizon_days: int = 360,
+) -> list[dict]:
+    """가용 조회 이진 탐색으로 노선별 실제 왕복 가능 최종 조회종료일을 찾아 반환한다."""
+    max_horizon = today + timedelta(horizon_days)
+    term = _connect_or_relogin(cfg, log, stop, background, force_relogin=False)
+    avail_cache: dict[tuple[date, str, str, str], tuple[str, list[dict]]] = {}
+    flight_last_cache: dict[tuple[str, str, str, int], date | None] = {}
+
+    # 같은 편명이 시즌별로 2행 이상 분할돼 있으면 가장 마지막 행만 기본 업데이트 대상으로 본다.
+    latest_end_by_key: dict[tuple[str, str, str, str, str], str] = {}
+    for r in all_routes:
+        if not r.get("enabled", True):
+            continue
+        k = (r.get("origin", ""), r.get("destination", ""), r.get("airline", ""), r.get("depFlight", ""), r.get("retFlight", ""))
+        ed = c.route_end_date(r)
+        if ed and ed > latest_end_by_key.get(k, ""):
+            latest_end_by_key[k] = ed
+
+    def has_flight(d: date, frm: str, to: str, airline: str, flt_no: int) -> tuple[bool, set[int] | None]:
+        nonlocal term
+        if d < today or d > max_horizon or stop.is_set():
+            return False, None
+        key = (d, frm, to, airline)
+        if key not in avail_cache:
+            for attempt in range(2):
+                try:
+                    txt = term.cmd(f"1{c.ddmmm(d)}{frm}{to}¥{airline}", settle=0.25)
+                    rows = c.parse_availability(txt) if c.ddmmm(d) in txt else []
+                    avail_cache[key] = (txt, rows)
+                    break
+                except SessionExpired as exc:
+                    if not cfg or stop.is_set() or attempt >= 1:
+                        raise
+                    log(f"최종일 탐색 중 세션 만료({exc}) -> 자동 재로그인")
+                    term.close()
+                    term = _connect_or_relogin(cfg, log, stop, background, force_relogin=True)
+        txt, rows = avail_cache.get(key, ("", []))
+        row = c.find_row(rows, airline, flt_no)
+        return (row is not None), (c.parse_operating_weekdays(txt, airline, flt_no) if row else None)
+
+    def probe_week(anchor: date, frm: str, to: str, airline: str, flt_no: int, known_dow: set[int]) -> date | None:
+        cands = [anchor + timedelta(i) for i in range(7) if anchor + timedelta(i) <= max_horizon]
+        if not cands or stop.is_set():
+            return None
+        pref = [d for d in cands if d.weekday() in known_dow] or cands
+        picks = [pref[0]]
+        if len(cands) >= 4:
+            alt = cands[min(3, len(cands) - 1)]
+            if alt != picks[0]:
+                picks.append(alt)
+        for d in picks:
+            ok, dow = has_flight(d, frm, to, airline, flt_no)
+            if ok:
+                if dow:
+                    known_dow.clear()
+                    known_dow.update(dow)
+                return d
+        return None
+
+    def find_last_date(frm: str, to: str, airline: str, flt_no: int, hint: date | None) -> date | None:
+        ckey = (frm, to, airline, flt_no)
+        if ckey in flight_last_cache:
+            return flight_last_cache[ckey]
+        known_dow = set(range(7))
+        lo_ok: date | None = None
+        hi_fail = max_horizon + timedelta(1)
+        if hint and today < hint <= max_horizon:
+            ok, dow = has_flight(hint, frm, to, airline, flt_no)
+            if ok:
+                if dow:
+                    known_dow = dow
+                lo_ok = hint
+                nxt = probe_week(hint + timedelta(1), frm, to, airline, flt_no, known_dow)
+                if nxt is None:
+                    hi_fail = min(hi_fail, hint + timedelta(7))
+                else:
+                    lo_ok = nxt
+            else:
+                hi_fail = hint
+        if lo_ok is None:
+            for offset in (7, 14, 28, 60):
+                if stop.is_set():
+                    return None
+                hit = probe_week(today + timedelta(offset), frm, to, airline, flt_no, known_dow)
+                if hit is not None:
+                    lo_ok = hit
+                    break
+            if lo_ok is None:
+                flight_last_cache[ckey] = None
+                return None
+        while (hi_fail - lo_ok).days > 7 and not stop.is_set():
+            mid = lo_ok + timedelta((hi_fail - lo_ok).days // 2)
+            hit = probe_week(mid, frm, to, airline, flt_no, known_dow)
+            if hit is not None:
+                lo_ok = hit
+            else:
+                hi_fail = mid
+        lo_d, hi_d = lo_ok, min(hi_fail - timedelta(1), max_horizon)
+        while lo_d < hi_d and not stop.is_set():
+            mid = lo_d + timedelta((hi_d - lo_d).days // 2 + 1)
+            ok, _ = has_flight(mid, frm, to, airline, flt_no)
+            if ok:
+                lo_d = mid
+            else:
+                found_higher = None
+                for delta in range((hi_d - mid).days, 0, -1):
+                    cand = mid + timedelta(delta)
+                    ok2, _ = has_flight(cand, frm, to, airline, flt_no)
+                    if ok2:
+                        found_higher = cand
+                        break
+                if found_higher is not None:
+                    flight_last_cache[ckey] = found_higher
+                    return found_higher
+                hi_d = mid - timedelta(1)
+        flight_last_cache[ckey] = lo_d
+        return lo_d
+
+    results: list[dict] = []
+    total = max(1, len(targets))
+    try:
+        for step, (idx, route) in enumerate(targets, 1):
+            if stop.is_set():
+                break
+            al, org, dst = route["airline"], route["origin"], route["destination"]
+            f_out, f_ret = c.flight_no(route["depFlight"], al), c.flight_no(route["retFlight"], al)
+            max_d = max(route["days"])
+            old_end = c.route_end_date(route)
+            ex = date.fromisoformat(old_end) if old_end else None
+            log(f"[{step}/{total}] {c.flight_pair_label(route)} 최종 조회일 탐색 중...")
+            last_ret = find_last_date(dst, org, al, f_ret, (ex + timedelta(max_d)) if ex else None)
+            final_end: date | None = None
+            if last_ret is not None and not stop.is_set():
+                cand_out = last_ret - timedelta(max_d)
+                ok_out, _ = has_flight(cand_out, org, dst, al, f_out)
+                if ok_out:
+                    final_end = cand_out
+                else:
+                    last_out = find_last_date(org, dst, al, f_out, min(cand_out, ex) if ex else cand_out)
+                    if last_out is not None:
+                        final_end = min(last_out, cand_out)
+            new_end = final_end.isoformat() if final_end else ""
+            rkey = (org, dst, al, route["depFlight"], route["retFlight"])
+            is_earlier_split = bool(old_end and latest_end_by_key.get(rkey, "") > old_end)
+            results.append({
+                "index": idx,
+                "route": route,
+                "oldEnd": old_end,
+                "newEnd": new_end,
+                "lastRet": last_ret.isoformat() if last_ret else "",
+                "changed": bool(new_end) and new_end != old_end,
+                "isEarlierSeasonSplit": is_earlier_split,
+            })
+        try:
+            term.cmd("I")
+        except Exception:
+            pass
+        return results
+    finally:
+        term.close()
+
+
+def _force_navigate_page(page: Page, url: str = LOGIN_URL) -> None:
+    """세션이 실제로 끊긴 탭에서만 beforeunload("사이트에서 나가시겠습니까?")를 해제하고 로그인 URL로 이동한다."""
+    try:
+        page.send("Page.enable")
+    except Exception:
+        pass
+    orig_send = page.send
+
+    def send_accepting_beforeunload(method: str, params: dict | None = None) -> dict:
+        page.seq += 1
+        req_id = page.seq
+        page.ws.send(json.dumps({"id": req_id, "method": method, "params": params or {}}))
+        while True:
+            msg = json.loads(page.ws.recv())
+            if msg.get("method") == "Page.javascriptDialogOpening":
+                page.seq += 1
+                page.ws.send(json.dumps({
+                    "id": page.seq,
+                    "method": "Page.handleJavaScriptDialog",
+                    "params": {"accept": True},
+                }))
+                continue
+            if msg.get("id") == req_id:
+                return msg
+
+    try:
+        if hasattr(page, "ws"):
+            send_accepting_beforeunload("Page.navigate", {"url": url})
+            time.sleep(0.3)
+            try:
+                send_accepting_beforeunload("Page.handleJavaScriptDialog", {"accept": True})
+            except Exception:
+                pass
+        else:
+            orig_send("Page.navigate", {"url": url})
+    except Exception:
+        orig_send("Page.navigate", {"url": url})
+
+
 def _navigate_to_login(target: dict) -> None:
     page = Page(target)
     try:
-        page.send("Page.navigate", {"url": LOGIN_URL})
+        _force_navigate_page(page, LOGIN_URL)
     finally:
         page.close()
 
@@ -625,6 +848,7 @@ def launch_and_login(cfg: dict, log, stop: threading.Event, force_relogin: bool 
     push_resends = 0
     last_push_at: float | None = None
     srw_wait_logged = False
+    srw_wait_started: float | None = None
     misses = 0
     # 최초 대기 + (최대 재전송 횟수 * 재전송 간격) + 로그인 페이지 로딩 여유 120초
     overall_deadline = time.monotonic() + push_resend_interval * (max_push_resends + 1) + 120
@@ -646,9 +870,10 @@ def launch_and_login(cfg: dict, log, stop: threading.Event, force_relogin: bool 
         try:
             if srw:
                 if page.eval(SESSION_EXPIRED_JS):
-                    page.send("Page.navigate", {"url": LOGIN_URL})
+                    _force_navigate_page(page, LOGIN_URL)
                     filled = False
                     srw_wait_logged = False
+                    srw_wait_started = None
                     continue
                 if page.eval(S02_MODAL_JS):
                     continue
@@ -656,15 +881,20 @@ def launch_and_login(cfg: dict, log, stop: threading.Event, force_relogin: bool 
                     time.sleep(2)
                     page.eval(POPUP_JS)
                     # 재로그인 직후 구탭 오인식을 막기 위해 I -> IGD 생존 확인까지 완료한다.
-                    # 단, 방금 로그인된 작업창이 아직 호스트 연결 중일 수 있으므로 로그인 페이지로 튕기지 않고 대기한다.
+                    # 단, 방금 로그인된 작업창이 아직 호스트 연결 중일 수 있으므로 최대 45초까지 대기한다.
                     try:
                         check = Terminal.connect(prefer_api=False)
                         check.close()
                     except SessionExpired:
-                        if page.eval(SESSION_EXPIRED_JS):
-                            page.send("Page.navigate", {"url": LOGIN_URL})
+                        now = time.monotonic()
+                        if srw_wait_started is None:
+                            srw_wait_started = now
+                        if page.eval(SESSION_EXPIRED_JS) or (now - srw_wait_started) >= 45.0:
+                            log("Sabre 작업창 호스트 무응답 -> 로그인 페이지로 이동합니다.")
+                            _force_navigate_page(page, LOGIN_URL)
                             filled = False
                             srw_wait_logged = False
+                            srw_wait_started = None
                         elif not srw_wait_logged:
                             srw_wait_logged = True
                             log("Sabre 작업창 호스트 연결을 기다리는 중입니다...")

@@ -1,10 +1,12 @@
 """세이버자동조회 조회 노선 관리 창."""
 from __future__ import annotations
 
+import threading
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QFileDialog, QFrame,
@@ -13,10 +15,11 @@ from PySide6.QtWidgets import (
 )
 
 import sabre_core as c
+import sabre_terminal as t
 from sabre_ui import (
     BASE_DIR, COL_WIDTHS, ENABLED_CHOICES, FARE_CHOICES, FIELDS,
-    MANAGE_COLS, MANAGE_HEADERS, bind_alt_enter, format_date_edit,
-    matches_route_query, show,
+    MANAGE_COLS, MANAGE_HEADERS, EndDatePreviewDialog, bind_alt_enter,
+    format_date_edit, matches_route_query, show,
 )
 
 if TYPE_CHECKING:
@@ -94,10 +97,14 @@ class InlineComboBox(QComboBox):
 class ManageWindow(QDialog):
     """설정 > 조회 노선 관리 창 (검색 + 더블클릭/F2 인라인 편집 + 우클릭 메뉴 + CSV)."""
 
+    probe_status_signal = Signal(str)
+    probe_done_signal = Signal(object, str)
+
     def __init__(self, app: "App"):
         super().__init__(app)
         self.app = app
         self.setWindowTitle("조회 노선 관리")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinMaxButtonsHint)
         w, h = 1620, 840
         screen = QApplication.primaryScreen()
         if screen is not None:
@@ -106,7 +113,15 @@ class ManageWindow(QDialog):
             h = min(h, max(560, avail.height() - 80))
         self.resize(w, h)
         self.edit_state: dict | None = None
+        self._row_base_bg: dict[int, QBrush] = {}
+        self._probe_stop = threading.Event()
+        self._probe_running = False
+        self.probe_status_signal.connect(self._on_probe_status)
+        self.probe_done_signal.connect(self._on_probe_done)
         bind_alt_enter(self)
+        self.close_sc = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.close_sc.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.close_sc.activated.connect(self.close)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 14, 14, 14)
@@ -142,6 +157,8 @@ class ManageWindow(QDialog):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.on_context_menu)
         self.table.cellDoubleClicked.connect(self.on_cell_double_click)
+        self.table.itemSelectionChanged.connect(self._update_row_highlight)
+        self.table.currentCellChanged.connect(lambda *_a: self._update_row_highlight())
         self.table.viewport().installEventFilter(self)
         hdr = self.table.horizontalHeader()
         hdr.setStretchLastSection(False)
@@ -182,11 +199,22 @@ class ManageWindow(QDialog):
         btns.setSpacing(8)
         exp_btn = QPushButton("CSV 내보내기")
         imp_btn = QPushButton("CSV 불러오기")
+        self.probe_btn = QPushButton("최종 조회일 업데이트")
+        self.probe_stop_btn = QPushButton("■ 탐색 정지")
+        self.probe_stop_btn.setObjectName("DangerBtn")
+        self.probe_stop_btn.setVisible(False)
+        self.probe_status_lbl = QLabel("")
+        self.probe_status_lbl.setObjectName("MutedLabel")
         exp_btn.clicked.connect(self.export_csv)
         imp_btn.clicked.connect(self.import_csv)
+        self.probe_btn.clicked.connect(lambda: self.start_end_date_update())
+        self.probe_stop_btn.clicked.connect(self._probe_stop.set)
         btns.addWidget(exp_btn)
         btns.addWidget(imp_btn)
-        btns.addStretch()
+        btns.addWidget(self.probe_btn)
+        btns.addWidget(self.probe_stop_btn)
+        btns.addSpacing(8)
+        btns.addWidget(self.probe_status_lbl, 1)
         lay.addLayout(btns)
 
         self.refresh_table()
@@ -228,6 +256,7 @@ class ManageWindow(QDialog):
     def refresh_table(self) -> None:
         self.cancel_row_edit()
         query = self.search_edit.text()
+        main_start = c.normalize_date_text(self.app.start_edit.text())
         self.table.clearSpans()
         self.table.setRowCount(0)
         shown = 0
@@ -237,7 +266,8 @@ class ManageWindow(QDialog):
             row = self.table.rowCount()
             self.table.insertRow(row)
             values = [
-                ("최저가" if k == "bookingClass" and not show(r, k) else show(r, k))
+                ("최저가" if k == "bookingClass" and not show(r, k)
+                 else (main_start if k == "startDate" and not show(r, k) else show(r, k)))
                 for _, k in FIELDS
             ] + ["FARE KRW" if c.route_fare_only(r) else "TOTAL KRW", "사용" if r.get("enabled", True) else "중지"]
             for col, val in enumerate(values):
@@ -253,9 +283,11 @@ class ManageWindow(QDialog):
 
     def _apply_group_spans(self) -> None:
         self.table.clearSpans()
+        self._row_base_bg.clear()
         count = self.table.rowCount()
         even_bg = QBrush(QColor("#ffffff"))
         odd_bg = QBrush(QColor("#f1f5f9"))
+        base_fg = QBrush(QColor("#0f172a"))
         row, band = 0, 0
         while row < count:
             idx = self._row_route_index(row)
@@ -263,10 +295,12 @@ class ManageWindow(QDialog):
             grp = item.text().strip() if (idx is not None and item is not None) else ""
             if not grp:
                 bg = odd_bg if band % 2 else even_bg
+                self._row_base_bg[row] = bg
                 for col in range(len(MANAGE_COLS)):
                     cell = self.table.item(row, col)
                     if cell is not None:
                         cell.setBackground(bg)
+                        cell.setForeground(base_fg)
                 band += 1
                 row += 1
                 continue
@@ -280,14 +314,49 @@ class ManageWindow(QDialog):
                 end += 1
             bg = odd_bg if band % 2 else even_bg
             for r in range(row, end):
+                self._row_base_bg[r] = bg
                 for col in range(len(MANAGE_COLS)):
                     cell = self.table.item(r, col)
                     if cell is not None:
                         cell.setBackground(bg)
+                        cell.setForeground(base_fg)
             if end - row > 1:
                 self.table.setSpan(row, 0, end - row, 1)
             band += 1
             row = end
+        self._update_row_highlight()
+
+    def _update_row_highlight(self) -> None:
+        sel_indexes = self.table.selectedIndexes()
+        active_rows = {idx.row() for idx in sel_indexes}
+        for idx in sel_indexes:
+            if idx.column() == 0:
+                span = self.table.rowSpan(idx.row(), 0)
+                if span > 1:
+                    active_rows.update(range(idx.row(), idx.row() + span))
+        cur_r, cur_c = self.table.currentRow(), self.table.currentColumn()
+        if not active_rows and cur_r >= 0:
+            active_rows.add(cur_r)
+            if cur_c == 0 and self.table.rowSpan(cur_r, 0) > 1:
+                active_rows.update(range(cur_r, cur_r + self.table.rowSpan(cur_r, 0)))
+        hl_bg = QBrush(QColor("#fee2e2"))
+        hl_fg = QBrush(QColor("#991b1b"))
+        base_fg = QBrush(QColor("#0f172a"))
+        for r in range(self.table.rowCount()):
+            is_active = r in active_rows
+            base_bg = self._row_base_bg.get(r, QBrush(QColor("#ffffff")))
+            span = self.table.rowSpan(r, 0)
+            span_active = span > 1 and all(sr in active_rows for sr in range(r, r + span))
+            for col in range(len(MANAGE_COLS)):
+                cell = self.table.item(r, col)
+                if cell is None:
+                    continue
+                if is_active and (col > 0 or span <= 1 or span_active):
+                    cell.setBackground(hl_bg)
+                    cell.setForeground(hl_fg)
+                else:
+                    cell.setBackground(base_bg)
+                    cell.setForeground(base_fg)
 
     def on_cell_double_click(self, row: int, col: int) -> None:
         self.start_row_edit(row, focus_col=col)
@@ -460,6 +529,7 @@ class ManageWindow(QDialog):
             self.table.setCurrentCell(row, 0)
             menu.addAction("노선 복사", self.copy_route_row)
             menu.addAction("노선 삭제", self.delete_route_row)
+            menu.addAction("최종 조회일 업데이트", lambda idx=self._row_route_index(row): self.start_end_date_update([idx]))
         else:
             menu.addAction("노선 추가", self.add_route_row)
             menu.addAction("붙여넣기로 노선 추가", lambda: self.paste_to_selected_cells(force_append=True))
@@ -534,6 +604,8 @@ class ManageWindow(QDialog):
                 )
                 if key in ("startDate", "endDate"):
                     w.editingFinished.connect(lambda e=w: format_date_edit(e))
+                    if key == "startDate":
+                        w.setPlaceholderText(c.normalize_date_text(self.app.start_edit.text()))
             self.table.setCellWidget(row, col, w)
             widgets[key] = w
         self.edit_state = {"row": row, "index": index, "widgets": widgets}
@@ -661,7 +733,92 @@ class ManageWindow(QDialog):
         self.app.save_routes_and_refresh()
         QMessageBox.information(self, "완료", f"{len(routes)}개 노선을 반영했습니다.")
 
+    def start_end_date_update(self, explicit_indices: list[int] | None = None) -> None:
+        if self._probe_running:
+            return
+        if self.edit_state and not self.commit_row_edit():
+            return
+        if explicit_indices is not None:
+            indices = [i for i in explicit_indices if i is not None and 0 <= i < len(self.app.routes)]
+        else:
+            sel_rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
+            indices = []
+            for r in sel_rows:
+                ri = self._row_route_index(r)
+                if ri is not None and ri not in indices:
+                    indices.append(ri)
+            if not indices:
+                indices = [i for i, rt in enumerate(self.app.routes) if rt.get("enabled", True) and c.is_complete_route(rt)]
+                if not indices:
+                    QMessageBox.information(self, "안내", "탐색할 사용 중인 노선이 없습니다.")
+                    return
+                ans = QMessageBox.question(
+                    self,
+                    "최종 조회일 업데이트",
+                    f"사용 중인 전체 {len(indices)}개 노선의 최종 조회일을 Sabre에서 탐색할까요?",
+                )
+                if ans != QMessageBox.StandardButton.Yes:
+                    return
+        targets = [(i, dict(self.app.routes[i])) for i in indices if c.is_complete_route(self.app.routes[i])]
+        if not targets:
+            QMessageBox.information(self, "안내", "필수 항목이 모두 입력된 노선을 선택하세요.")
+            return
+        self._probe_stop.clear()
+        self._probe_running = True
+        self.probe_btn.setEnabled(False)
+        self.probe_stop_btn.setVisible(True)
+        self.probe_status_lbl.setText(f"최종 조회일 탐색 시작 ({len(targets)}개 노선)...")
+        cfg = self.app.load_cfg()
+        all_snapshot = [dict(r) for r in self.app.routes]
+        threading.Thread(
+            target=self._probe_worker,
+            args=(targets, all_snapshot, cfg),
+            daemon=True,
+        ).start()
+
+    def _probe_worker(self, targets: list[tuple[int, dict]], all_routes: list[dict], cfg: dict) -> None:
+        try:
+            results = t.discover_last_end_dates(
+                targets,
+                all_routes,
+                date.today(),
+                lambda msg, _p=None: self.probe_status_signal.emit(msg),
+                self._probe_stop,
+                background=True,
+                cfg=cfg,
+            )
+            self.probe_done_signal.emit(results, "")
+        except Exception as exc:
+            self.probe_done_signal.emit([], str(exc))
+
+    def _on_probe_status(self, msg: str) -> None:
+        self.probe_status_lbl.setText(msg)
+        self.app.log(msg)
+
+    def _on_probe_done(self, results, err: str) -> None:
+        self._probe_running = False
+        self.probe_btn.setEnabled(True)
+        self.probe_stop_btn.setVisible(False)
+        if err:
+            self.probe_status_lbl.setText(f"탐색 중단: {err}")
+            QMessageBox.warning(self, "최종 조회일 업데이트 오류", err)
+            return
+        if self._probe_stop.is_set() and not results:
+            self.probe_status_lbl.setText("최종 조회일 탐색이 정지되었습니다.")
+            return
+        self.probe_status_lbl.setText(f"탐색 완료 ({len(results)}건)")
+        dlg = EndDatePreviewDialog(self, results)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_updates:
+            for idx, new_end in dlg.selected_updates.items():
+                if 0 <= idx < len(self.app.routes):
+                    self.app.routes[idx]["endDate"] = new_end
+            self.app.save_routes_and_refresh()
+            msg = f"최종 조회일 {len(dlg.selected_updates)}건 반영 완료"
+            self.probe_status_lbl.setText(msg)
+            self.app.log(msg)
+
     def closeEvent(self, event) -> None:
+        self._probe_stop.set()
         if self.edit_state and not self.commit_row_edit():
             event.ignore()
             return

@@ -184,6 +184,24 @@ def find_row(rows: list[dict], airline: str, number: int) -> dict | None:
     return next((r for r in rows if r["carrier"] == airline and r["number"] == number), None)
 
 
+def parse_operating_weekdays(avail_text: str, carrier: str, number: int) -> set[int]:
+    """Sabre 가용 화면에서 편명의 운항 요일(Python weekday 0=월..6=일)을 추출한다. 표기 없으면 매일."""
+    pat = re.compile(rf"^\s*\d{{1,2}}{re.escape(carrier.upper())}\s*0*{number}\b(.*)$")
+    for ln in avail_text.upper().splitlines():
+        m = pat.match(ln)
+        if not m:
+            continue
+        rest = m.group(1)
+        mx = re.search(r"\bX([1-7]{1,6})\s+DC", rest)
+        if mx:
+            return set(range(7)) - {int(ch) - 1 for ch in mx.group(1)}
+        mo = re.search(r"\b([1-7]{1,6})\s+DC", rest)
+        if mo:
+            return {int(ch) - 1 for ch in mo.group(1)}
+        return set(range(7))
+    return set(range(7))
+
+
 def open_class(classes: dict, pax: int = 1) -> str | None:
     """좌석이 pax석 이상 남은 이코노미 클래스. Y 우선, 없으면 None(전석 마감)."""
     keys = list(classes.keys())

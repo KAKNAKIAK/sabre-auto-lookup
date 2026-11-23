@@ -11,9 +11,9 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QFileDialog, QFormLayout, QFrame,
-    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QDialog, QFileDialog, QFormLayout,
+    QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
+    QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 import sabre_core as c
@@ -433,6 +433,7 @@ def toggle_window_maximize(win: QWidget) -> None:
 def bind_alt_enter(win: QWidget) -> None:
     for key in ("Alt+Return", "Alt+Enter"):
         sc = QShortcut(QKeySequence(key), win)
+        sc.setContext(Qt.ShortcutContext.WindowShortcut)
         sc.activated.connect(lambda w=win: toggle_window_maximize(w))
 
 
@@ -656,6 +657,95 @@ class SingleDateResultDialog(QDialog):
         bar.addWidget(copy_all_btn)
         bar.addWidget(close_btn)
         lay.addLayout(bar)
+
+
+class EndDatePreviewDialog(QDialog):
+    """최종 조회일 탐색 결과 미리보기 및 선택 적용 팝업."""
+
+    def __init__(self, parent: QWidget | None, results: list[dict]):
+        super().__init__(parent)
+        self.setWindowTitle("최종 조회일 업데이트 미리보기")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinMaxButtonsHint)
+        self.resize(840, 480)
+        bind_alt_enter(self)
+        self.selected_updates: dict[int, str] = {}
+        self._rows: list[tuple[QCheckBox, dict]] = []
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(10)
+
+        changed_cnt = sum(1 for r in results if r["changed"])
+        summary = QLabel(f"총 {len(results)}개 노선 탐색 완료 · 변경 감지 {changed_cnt}건 (체크된 항목만 저장됩니다)")
+        summary.setObjectName("FieldLabel")
+        lay.addWidget(summary)
+
+        table = QTableWidget(len(results), 7)
+        table.setHorizontalHeaderLabels(["적용", "노선그룹", "편명", "일수", "기존 종료일", "탐색 종료일", "상태"])
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(30)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        hdr = table.horizontalHeader()
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for col, w in ((0, 52), (2, 115), (3, 70), (4, 110), (5, 110), (6, 140)):
+            table.setColumnWidth(col, w)
+
+        for r_idx, item in enumerate(results):
+            route = item["route"]
+            new_end = item["newEnd"]
+            if not new_end:
+                status = "탐색실패"
+            elif item["isEarlierSeasonSplit"]:
+                status = "시즌분할(확인필요)"
+            elif item["changed"]:
+                status = "변경"
+            else:
+                status = "유지"
+            chk = QCheckBox()
+            chk.setEnabled(bool(new_end))
+            chk.setChecked(bool(item["changed"] and not item["isEarlierSeasonSplit"]))
+            wrap = QWidget()
+            wlay = QHBoxLayout(wrap)
+            wlay.setContentsMargins(0, 0, 0, 0)
+            wlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            wlay.addWidget(chk)
+            table.setCellWidget(r_idx, 0, wrap)
+            self._rows.append((chk, item))
+
+            vals = (
+                c.route_group(route),
+                c.flight_pair_label(route),
+                ",".join(map(str, route["days"])),
+                item["oldEnd"] or "-",
+                new_end or "-",
+                status,
+            )
+            for col, val in enumerate(vals, start=1):
+                ti = QTableWidgetItem(val)
+                ti.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                table.setItem(r_idx, col, ti)
+        lay.addWidget(table, 1)
+
+        bar = QHBoxLayout()
+        bar.addStretch()
+        apply_btn = QPushButton("선택 항목 적용")
+        apply_btn.setObjectName("PrimaryBtn")
+        apply_btn.setDefault(True)
+        cancel_btn = QPushButton("취소")
+        apply_btn.clicked.connect(self.apply_selected)
+        cancel_btn.clicked.connect(self.reject)
+        bar.addWidget(apply_btn)
+        bar.addWidget(cancel_btn)
+        lay.addLayout(bar)
+
+    def apply_selected(self) -> None:
+        self.selected_updates = {
+            item["index"]: item["newEnd"]
+            for chk, item in self._rows
+            if chk.isChecked() and item["newEnd"]
+        }
+        self.accept()
 
 
 def apply_theme(app: QApplication) -> None:

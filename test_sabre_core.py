@@ -340,6 +340,34 @@ class CoreTest(unittest.TestCase):
         finally:
             t.find_target, t.Page, t.Terminal.connect, t.time.sleep = orig_find, orig_page, orig_conn, orig_sleep
 
+    def test_force_navigate_page_accepts_beforeunload_on_dead_session(self):
+        import json
+        sent = []
+        incoming = iter([
+            json.dumps({"id": 1, "result": {}}),  # Page.enable
+            json.dumps({"method": "Page.javascriptDialogOpening", "params": {"type": "beforeunload"}}),
+            json.dumps({"id": 3, "result": {}}),  # handleJavaScriptDialog
+            json.dumps({"id": 2, "result": {"frameId": "F1"}}),  # Page.navigate
+            json.dumps({"id": 4, "result": {}}),  # follow-up handleJavaScriptDialog
+        ])
+        class FakeWS:
+            def send(self, payload):
+                sent.append(json.loads(payload))
+            def recv(self):
+                return next(incoming)
+        page = t.Page.__new__(t.Page)
+        page.ws = FakeWS()
+        page.seq = 0
+        orig_sleep = t.time.sleep
+        t.time.sleep = lambda _s: None
+        try:
+            t._force_navigate_page(page, t.LOGIN_URL)
+            methods = [m["method"] for m in sent]
+            self.assertIn("Page.navigate", methods)
+            self.assertIn("Page.handleJavaScriptDialog", methods)
+        finally:
+            t.time.sleep = orig_sleep
+
     def test_find_flight_paginates_with_1star(self):
         page1 = "01DEC TUE ICN/Z¥9 SGN/-2\n1 KE 475 J9 Y9 B9 ICN SGN 08:00"
         page2 = "7 KE 471 J9 Y9 B9 ICN SGN 18:30"
@@ -556,6 +584,18 @@ class CoreTest(unittest.TestCase):
             gui.open_manage_window()
             mgr = gui.manage_win
             self.assertIsNotNone(mgr)
+            # 조회시작일이 공란이면 표에 메인 화면의 시작일 값을 표시하되 저장값은 공란 유지
+            start_col = app_mod.MANAGE_COLS.index("startDate")
+            self.assertEqual(mgr.table.item(0, start_col).text(), gui.start_edit.text())
+            gui.start_edit.setText("2026-12-03")
+            gui._on_main_start_finished()
+            self.assertEqual(mgr.table.item(0, start_col).text(), "2026-12-03")
+            self.assertEqual(mgr.close_sc.key().toString(), "Ctrl+Q")
+            self.assertTrue(bool(mgr.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint))
+            app_mod.toggle_window_maximize(mgr)
+            self.assertTrue(mgr.isMaximized())
+            app_mod.toggle_window_maximize(mgr)
+            self.assertFalse(mgr.isMaximized())
             gui.open_manage_window()
             self.assertIs(gui.manage_win, mgr)
             mgr.start_row_edit(0, focus_col=app_mod.MANAGE_COLS.index("pax"))
@@ -597,7 +637,7 @@ class CoreTest(unittest.TestCase):
             self.assertEqual([a.text() for a in mgr.build_context_menu(-1).actions()], ["노선 추가", "붙여넣기로 노선 추가"])
             self.assertEqual(mgr.blank_zone.height(), 52)
             self.assertEqual(mgr.table.verticalScrollMode(), mgr.table.ScrollMode.ScrollPerPixel)
-            self.assertEqual([a.text() for a in mgr.build_context_menu(0).actions()], ["노선 복사", "노선 삭제"])
+            self.assertEqual([a.text() for a in mgr.build_context_menu(0).actions()], ["노선 복사", "노선 삭제", "최종 조회일 업데이트"])
             self.assertEqual(mgr.table.currentRow(), 0)
             warned = []
             orig_warn = QMessageBox.warning
@@ -641,6 +681,16 @@ class CoreTest(unittest.TestCase):
             self.assertEqual(mgr.edit_state["row"], 2)
             mgr.cancel_row_edit()
             end_col = app_mod.MANAGE_COLS.index("endDate")
+            mgr.table.clearSelection()
+            mgr.table.setCurrentCell(2, end_col)
+            # 셀 클릭 시 해당 행 전체가 붉은 계통(#fee2e2)으로 강조되고 다른 행은 기본색 유지
+            self.assertEqual(mgr.table.item(2, 1).background().color().name().lower(), "#fee2e2")
+            self.assertNotEqual(mgr.table.item(0, 1).background().color().name().lower(), "#fee2e2")
+            # 병합된 노선그룹(0열, 0~1행 병합) 클릭 시 병합된 모든 행 전체가 붉은 계통으로 강조됨
+            mgr.table.clearSelection()
+            mgr.table.setCurrentCell(0, 0)
+            self.assertEqual(mgr.table.item(0, 1).background().color().name().lower(), "#fee2e2")
+            self.assertEqual(mgr.table.item(1, 1).background().color().name().lower(), "#fee2e2")
             mgr.table.clearSelection()
             mgr.table.setCurrentCell(2, end_col)
             self.assertEqual(mgr.copy_selected_cells(), "2027-10-31")
@@ -838,7 +888,13 @@ class CoreTest(unittest.TestCase):
                         break
                     time.sleep(0.02)
                 self.assertEqual((len(captured_single), captured_single[0][3], captured_single[0][0][0][0]["pax"]), (1, 2, 2))
+                # 실행 중에는 단일 버튼이 '■ 정지'(DangerBtn)로 전환되고 클릭 시 stop 설정, 완료 시 복원
+                self.assertEqual((gui.run_btn.text(), gui.run_btn.objectName()), ("■ 정지", "DangerBtn"))
+                gui.on_run_button_click()
+                self.assertTrue(gui.stop.is_set())
+                self.assertEqual(gui.run_btn.text(), "정지 중...")
                 gui.reset_buttons()
+                self.assertEqual((gui.run_btn.text(), gui.run_btn.objectName()), ("▶ 최저가 확인", "SuccessBtn"))
                 gui.job_entries[0][1].setChecked(False)
             finally:
                 gui.single_date_worker = orig_sw
@@ -1003,6 +1059,55 @@ class CoreTest(unittest.TestCase):
                 self.assertEqual([wb2.active['B2'].value, wb2.active['C2'].value], ['LJ001(+2)', 'LJ001(+3)'])
             finally:
                 wb2.close()
+
+    def test_discover_last_end_dates_and_preview_dialog(self):
+        import threading
+        from PySide6.QtWidgets import QApplication
+        qt_app = QApplication.instance() or QApplication([])
+        self.assertEqual(c.parse_operating_weekdays(' 17C 2303 Y9 ICNCXR 2150 0110¥1 738 0 X236 DC /E', '7C', 2303), {0, 3, 4, 6})
+        self.assertEqual(c.parse_operating_weekdays(' 1LJ 127 Y9 ICNCXR 1955 2320 738 0 25 DC /E', 'LJ', 127), {1, 4})
+        self.assertEqual(c.parse_operating_weekdays(' 1KE 843 Y9 ICNTAO 1255 1340 738 0 DC /E', 'KE', 843), set(range(7)))
+        today = date(2026, 11, 23)
+        r_winter = c.normalize_route({'routeGroup': 'ICN-CXR', 'origin': 'ICN', 'destination': 'CXR', 'airline': 'TW',
+                                      'depFlight': 'TW033', 'retFlight': 'TW034', 'days': '4', 'endDate': '2027-03-24'})
+        r_summer = c.normalize_route({'routeGroup': 'ICN-CXR', 'origin': 'ICN', 'destination': 'CXR', 'airline': 'TW',
+                                      'depFlight': 'TW033', 'retFlight': 'TW034', 'days': '3', 'startDate': '2027-03-31', 'endDate': '2027-09-30'})
+        # 실제 TW033/034가 2027-10-27까지 열려 있는 시나리오 (동계 행은 시즌분할 보호로 기본 미체크, 하계 행은 2027-10-24로 갱신 체크)
+        limit_ret = date(2027, 10, 27)
+        class FakeTerm:
+            mode = 'API'
+            def minimize(self): pass
+            def close(self): pass
+            def cmd(self, txt, settle=0.25):
+                if txt == 'I': return 'IGD'
+                dd = txt[1:6]
+                # 2026년 11~12월 또는 2027년 1~11월 복원
+                mon = c.MONTHS.index(dd[2:]) + 1
+                yr = 2026 if mon >= 11 and int(dd[:2]) >= 23 else (2026 if mon == 12 else 2027)
+                if mon == 11 and int(dd[:2]) < 23: yr = 2027
+                d = date(yr, mon, int(dd[:2]))
+                if d > limit_ret:
+                    return ''
+                if 'ICNCXR' in txt:
+                    return f' {dd} TUE ICN/Z¥9 CXR/-2\n 1TW 33 Y9 ICNCXR 2010 2355 738 0 DC /E\n'
+                return f' {dd} TUE CXR/Z¥7 ICN/¥2\n 1TW 34 Y9 CXRICN 0055 0755 738 0 DC /E\n'
+        orig_conn = t.Terminal.connect
+        t.Terminal.connect = classmethod(lambda cls, prefer_api=True: FakeTerm())
+        try:
+            res = t.discover_last_end_dates([(0, r_winter), (1, r_summer)], [r_winter, r_summer], today, lambda *_a: None, threading.Event(), background=False)
+            self.assertEqual(res[0]['newEnd'], '2027-10-23')
+            self.assertTrue(res[0]['isEarlierSeasonSplit'])
+            self.assertEqual(res[1]['newEnd'], '2027-10-24')
+            self.assertFalse(res[1]['isEarlierSeasonSplit'])
+            self.assertTrue(res[1]['changed'])
+            dlg = app_mod.EndDatePreviewDialog(None, res)
+            dlg.apply_selected()
+            # 시즌분할 앞행(0번)은 자동 보호되어 미체크, 최신 시즌 행(1번)만 자동 체크 반영
+            self.assertEqual(dlg.selected_updates, {1: '2027-10-24'})
+            dlg.close()
+            qt_app.processEvents()
+        finally:
+            t.Terminal.connect = orig_conn
 
     def test_login_config_remember_and_clear(self):
         with tempfile.TemporaryDirectory() as tmp:

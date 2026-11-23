@@ -10,7 +10,7 @@
       "depFlight": "KE471",
       "retFlight": "KE478",
       "startDate": "",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-14",
       "days": [
         4
       ],
@@ -28,13 +28,121 @@
       "depFlight": "VJ979",
       "retFlight": "VJ978",
       "startDate": "",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-15",
       "days": [
         3
       ],
       "pax": 4,
       "bookingClass": "T",
       "fareOnly": false,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-PQC-LCC",
+      "region": "푸꾸옥",
+      "origin": "ICN",
+      "destination": "PQC",
+      "airline": "7C",
+      "depFlight": "7C2315",
+      "retFlight": "7C2316",
+      "startDate": "",
+      "endDate": "2027-03-24",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-PQC-LCC",
+      "region": "푸꾸옥",
+      "origin": "ICN",
+      "destination": "PQC",
+      "airline": "LJ",
+      "depFlight": "LJ135",
+      "retFlight": "LJ136",
+      "startDate": "",
+      "endDate": "2027-03-24",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-PQC-LCC",
+      "region": "푸꾸옥",
+      "origin": "ICN",
+      "destination": "PQC",
+      "airline": "TW",
+      "depFlight": "TW055",
+      "retFlight": "TW056",
+      "startDate": "",
+      "endDate": "2027-03-24",
+      "days": [
+        4
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-PQC-LCC",
+      "region": "푸꾸옥",
+      "origin": "ICN",
+      "destination": "PQC",
+      "airline": "ZE",
+      "depFlight": "ZE581",
+      "retFlight": "ZE582",
+      "startDate": "",
+      "endDate": "2027-03-24",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-PQC-9G",
+      "region": "푸꾸옥",
+      "origin": "ICN",
+      "destination": "PQC",
+      "airline": "9G",
+      "depFlight": "9G455",
+      "retFlight": "9G454",
+      "startDate": "",
+      "endDate": "2027-03-24",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-HAN-VN",
+      "region": "하노이",
+      "origin": "ICN",
+      "destination": "HAN",
+      "airline": "VN",
+      "depFlight": "VN417",
+      "retFlight": "VN416",
+      "startDate": "",
+      "endDate": "2027-10-26",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
       "enabled": true
     },
     {
@@ -46,9 +154,135 @@
       "depFlight": "KE445",
       "retFlight": "KE450",
       "startDate": "",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-15",
       "days": [
         3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-DAD_VN",
+      "region": "다낭",
+      "origin": "ICN",
+      "destination": "DAD",
+      "airline": "VN",
+      "depFlight": "VN431",
+      "retFlight": "VN430",
+      "startDate": "",
+      "endDate": "2027-10-26",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-DAD_LCC",
+      "region": "다낭",
+      "origin": "ICN",
+      "destination": "DAD",
+      "airline": "7C",
+      "depFlight": "7C2217",
+      "retFlight": "7C2218",
+      "startDate": "",
+      "endDate": "2027-03-23",
+      "days": [
+        4
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-DAD_LCC",
+      "region": "다낭",
+      "origin": "ICN",
+      "destination": "DAD",
+      "airline": "LJ",
+      "depFlight": "LJ081",
+      "retFlight": "LJ082",
+      "startDate": "",
+      "endDate": "2027-03-24",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-DAD_LCC",
+      "region": "다낭",
+      "origin": "ICN",
+      "destination": "DAD",
+      "airline": "TW",
+      "depFlight": "TW011",
+      "retFlight": "TW012",
+      "startDate": "",
+      "endDate": "2027-03-24",
+      "days": [
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-DAD_LCC",
+      "region": "다낭",
+      "origin": "ICN",
+      "destination": "DAD",
+      "airline": "TW",
+      "depFlight": "TW011",
+      "retFlight": "TW014",
+      "startDate": "2027-03-25",
+      "endDate": "2027-03-27",
+      "days": [
+        4
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-DAD_LCC",
+      "region": "다낭",
+      "origin": "ICN",
+      "destination": "DAD",
+      "airline": "TW",
+      "depFlight": "TW013",
+      "retFlight": "TW014",
+      "startDate": "2027-03-28",
+      "endDate": "2027-10-27",
+      "days": [
+        4
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "VN_ICN-DAD_LCC",
+      "region": "다낭",
+      "origin": "ICN",
+      "destination": "DAD",
+      "airline": "ZE",
+      "depFlight": "ZE593",
+      "retFlight": "ZE594",
+      "startDate": "",
+      "endDate": "2027-10-27",
+      "days": [
+        4
       ],
       "pax": 4,
       "bookingClass": "Y",
@@ -64,7 +298,7 @@
       "depFlight": "KE457",
       "retFlight": "KE458",
       "startDate": "",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-15",
       "days": [
         3
       ],
@@ -172,7 +406,7 @@
       "depFlight": "KE467",
       "retFlight": "KE468",
       "startDate": "2027-10-29",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-15",
       "days": [
         3
       ],
@@ -190,7 +424,7 @@
       "depFlight": "KE415",
       "retFlight": "KE416",
       "startDate": "",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-15",
       "days": [
         3
       ],
@@ -208,7 +442,7 @@
       "depFlight": "KE677",
       "retFlight": "KE678",
       "startDate": "",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-15",
       "days": [
         3
       ],
@@ -226,7 +460,7 @@
       "depFlight": "7C2515",
       "retFlight": "7C2516",
       "startDate": "",
-      "endDate": "2027-03-21",
+      "endDate": "2027-03-24",
       "days": [
         4
       ],
@@ -290,277 +524,6 @@
       "enabled": true
     },
     {
-      "routeGroup": "CN_ICN-TAO-SC",
-      "region": "칭다오",
-      "origin": "ICN",
-      "destination": "TAO",
-      "airline": "SC",
-      "depFlight": "SC4624",
-      "retFlight": "SC4615",
-      "startDate": "",
-      "endDate": "2027-10-27",
-      "days": [
-        2,
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-PQC-LCC",
-      "region": "푸꾸옥",
-      "origin": "ICN",
-      "destination": "PQC",
-      "airline": "7C",
-      "depFlight": "7C2315",
-      "retFlight": "7C2316",
-      "startDate": "",
-      "endDate": "2027-03-24",
-      "days": [
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-PQC-LCC",
-      "region": "푸꾸옥",
-      "origin": "ICN",
-      "destination": "PQC",
-      "airline": "LJ",
-      "depFlight": "LJ135",
-      "retFlight": "LJ136",
-      "startDate": "",
-      "endDate": "2027-03-24",
-      "days": [
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-PQC-LCC",
-      "region": "푸꾸옥",
-      "origin": "ICN",
-      "destination": "PQC",
-      "airline": "TW",
-      "depFlight": "TW055",
-      "retFlight": "TW056",
-      "startDate": "",
-      "endDate": "2027-03-24",
-      "days": [
-        4
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-PQC-LCC",
-      "region": "푸꾸옥",
-      "origin": "ICN",
-      "destination": "PQC",
-      "airline": "ZE",
-      "depFlight": "ZE581",
-      "retFlight": "ZE582",
-      "startDate": "",
-      "endDate": "2027-03-24",
-      "days": [
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "ICN-PQC-9G",
-      "region": "푸꾸옥",
-      "origin": "ICN",
-      "destination": "PQC",
-      "airline": "9G",
-      "depFlight": "9G451",
-      "retFlight": "9G450",
-      "startDate": "",
-      "endDate": "2027-03-23",
-      "days": [
-        4
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-PQC-9G",
-      "region": "푸꾸옥",
-      "origin": "ICN",
-      "destination": "PQC",
-      "airline": "9G",
-      "depFlight": "9G455",
-      "retFlight": "9G454",
-      "startDate": "",
-      "endDate": "2027-03-24",
-      "days": [
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-HAN-VN",
-      "region": "하노이",
-      "origin": "ICN",
-      "destination": "HAN",
-      "airline": "VN",
-      "depFlight": "VN417",
-      "retFlight": "VN416",
-      "startDate": "",
-      "endDate": "2027-10-26",
-      "days": [
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-DAD_VN",
-      "region": "다낭",
-      "origin": "ICN",
-      "destination": "DAD",
-      "airline": "VN",
-      "depFlight": "VN431",
-      "retFlight": "VN430",
-      "startDate": "",
-      "endDate": "2027-10-26",
-      "days": [
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-DAD_LCC",
-      "region": "다낭",
-      "origin": "ICN",
-      "destination": "DAD",
-      "airline": "7C",
-      "depFlight": "7C2217",
-      "retFlight": "7C2218",
-      "startDate": "",
-      "endDate": "2027-03-22",
-      "days": [
-        4
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-DAD_LCC",
-      "region": "다낭",
-      "origin": "ICN",
-      "destination": "DAD",
-      "airline": "LJ",
-      "depFlight": "LJ081",
-      "retFlight": "LJ082",
-      "startDate": "",
-      "endDate": "2027-03-24",
-      "days": [
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-DAD_LCC",
-      "region": "다낭",
-      "origin": "ICN",
-      "destination": "DAD",
-      "airline": "TW",
-      "depFlight": "TW011",
-      "retFlight": "TW012",
-      "startDate": "",
-      "endDate": "2027-03-24",
-      "days": [
-        3
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-DAD_LCC",
-      "region": "다낭",
-      "origin": "ICN",
-      "destination": "DAD",
-      "airline": "TW",
-      "depFlight": "TW011",
-      "retFlight": "TW014",
-      "startDate": "2027-03-25",
-      "endDate": "2027-03-27",
-      "days": [
-        4
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-DAD_LCC",
-      "region": "다낭",
-      "origin": "ICN",
-      "destination": "DAD",
-      "airline": "TW",
-      "depFlight": "TW013",
-      "retFlight": "TW014",
-      "startDate": "2027-03-28",
-      "endDate": "2027-10-27",
-      "days": [
-        4
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
-      "routeGroup": "VN_ICN-DAD_LCC",
-      "region": "다낭",
-      "origin": "ICN",
-      "destination": "DAD",
-      "airline": "ZE",
-      "depFlight": "ZE593",
-      "retFlight": "ZE594",
-      "startDate": "",
-      "endDate": "2027-10-27",
-      "days": [
-        4
-      ],
-      "pax": 4,
-      "bookingClass": "Y",
-      "fareOnly": true,
-      "enabled": true
-    },
-    {
       "routeGroup": "TG_ICN-BKK-LCC",
       "region": "BKK",
       "origin": "ICN",
@@ -587,7 +550,7 @@
       "depFlight": "TW101",
       "retFlight": "TW102",
       "startDate": "",
-      "endDate": "2027-03-25",
+      "endDate": "2027-03-24",
       "days": [
         4
       ],
@@ -633,6 +596,43 @@
       "enabled": true
     },
     {
+      "routeGroup": "ICN-PQC-9G",
+      "region": "푸꾸옥",
+      "origin": "ICN",
+      "destination": "PQC",
+      "airline": "9G",
+      "depFlight": "9G451",
+      "retFlight": "9G450",
+      "startDate": "",
+      "endDate": "2027-03-23",
+      "days": [
+        4
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
+      "routeGroup": "CN_ICN-TAO-SC",
+      "region": "칭다오",
+      "origin": "ICN",
+      "destination": "TAO",
+      "airline": "SC",
+      "depFlight": "SC4624",
+      "retFlight": "SC4615",
+      "startDate": "",
+      "endDate": "2027-03-27",
+      "days": [
+        2,
+        3
+      ],
+      "pax": 4,
+      "bookingClass": "Y",
+      "fareOnly": true,
+      "enabled": true
+    },
+    {
       "routeGroup": "CN_ICN-TAO-KE",
       "region": "칭다오",
       "origin": "ICN",
@@ -641,7 +641,7 @@
       "depFlight": "KE843",
       "retFlight": "KE844",
       "startDate": "",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-15",
       "days": [
         2,
         3
@@ -660,7 +660,7 @@
       "depFlight": "CA440",
       "retFlight": "CA439",
       "startDate": "",
-      "endDate": "2027-10-31",
+      "endDate": "2027-11-15",
       "days": [
         3
       ],
