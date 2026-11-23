@@ -387,10 +387,31 @@ def get_output_root(cfg: dict | None = None, path: Path = CONFIG_PATH) -> Path:
     return Path(custom) if custom else c.OUTPUT_ROOT
 
 
+def has_saved_output_root(cfg: dict | None = None, path: Path = CONFIG_PATH) -> bool:
+    src = cfg if cfg is not None else read_config(path)
+    return bool(str(src.get("outputRoot") or "").strip())
+
+
+def validate_output_dir(folder: str | Path) -> tuple[bool, str]:
+    """조회 시작 전 저장 폴더 생성 및 쓰기 가능 여부를 검사한다."""
+    raw = str(folder or "").strip()
+    if not raw:
+        return False, "저장 경로가 비어 있습니다."
+    target = Path(raw)
+    probe = target / ".sabre_write_check.tmp"
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True, ""
+    except OSError as exc:
+        return False, f"저장 경로에 접근하거나 파일을 쓸 수 없습니다.\n경로: {target}\n사유: {exc}"
+
+
 def save_output_root(folder: str | Path, path: Path = CONFIG_PATH) -> None:
     cfg = read_config(path)
     raw = str(folder or "").strip()
-    cfg["outputRoot"] = "" if (not raw or Path(raw) == c.OUTPUT_ROOT) else raw
+    cfg["outputRoot"] = str(Path(raw)) if raw else str(c.OUTPUT_ROOT)
     path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
@@ -555,7 +576,7 @@ class LoginDialog(QDialog):
 class OutputPathDialog(QDialog):
     """요금조회 엑셀 파일 저장 경로 설정 팝업."""
 
-    def __init__(self, parent: QWidget | None, current: Path):
+    def __init__(self, parent: QWidget | None, current: Path, hint_text: str | None = None):
         super().__init__(parent)
         self.setWindowTitle("엑셀 저장 경로 설정")
         self.setModal(True)
@@ -566,8 +587,9 @@ class OutputPathDialog(QDialog):
         lay.setContentsMargins(18, 16, 18, 16)
         lay.setSpacing(10)
 
-        hint = QLabel("엑셀 파일이 저장될 기본 폴더입니다. 하위에 지역별 폴더가 자동 생성됩니다.")
+        hint = QLabel(hint_text or "엑셀 파일이 저장될 폴더입니다. 하위에 지역별 폴더가 자동 생성됩니다.")
         hint.setObjectName("MutedLabel")
+        hint.setWordWrap(True)
         lay.addWidget(hint)
 
         row = QHBoxLayout()
@@ -604,6 +626,10 @@ class OutputPathDialog(QDialog):
         raw = self.path_edit.text().strip()
         if not raw:
             QMessageBox.warning(self, "입력 확인", "저장 경로를 입력하세요.")
+            return
+        ok, err = validate_output_dir(raw)
+        if not ok:
+            QMessageBox.warning(self, "저장 경로 확인", err)
             return
         self.result_path = raw
         self.accept()

@@ -27,9 +27,9 @@ from sabre_ui import (
     FARE_CHOICES, FIELDS, MANAGE_COLS, MANAGE_HEADERS, ROUTES_PATH, SEARCH_KEYS,
     EndDatePreviewDialog, LoginDialog, LogWindow, OutputPathDialog, SingleDateResultDialog,
     add_months, apply_theme, bind_alt_enter, clear_remembered_login,
-    format_date_edit, get_output_root, has_saved_login, load_app_icon, mask_secret,
-    matches_route_query, read_config, save_login_config, save_output_root,
-    show, toggle_window_maximize,
+    format_date_edit, get_output_root, has_saved_login, has_saved_output_root,
+    load_app_icon, mask_secret, matches_route_query, read_config, save_login_config,
+    save_output_root, show, toggle_window_maximize, validate_output_dir,
 )
 
 MANUAL_URL = "https://kaknakiak.github.io/sabre-auto-lookup/"
@@ -294,15 +294,48 @@ class App(QMainWindow):
         self.log("로그인 정보를 업데이트했습니다.")
 
     def open_output_dir_settings(self) -> None:
-        dlg = OutputPathDialog(self, get_output_root())
+        dlg = OutputPathDialog(self, get_output_root(path=CONFIG_PATH))
         if dlg.exec() != QDialog.DialogCode.Accepted or dlg.result_path is None:
             return
         save_output_root(dlg.result_path, CONFIG_PATH)
-        self.log(f"엑셀 저장 경로 변경: {get_output_root()}")
+        self.log(f"엑셀 저장 경로 변경: {get_output_root(path=CONFIG_PATH)}")
+
+    def _ensure_valid_output_root(self) -> Path | None:
+        if not has_saved_output_root(path=CONFIG_PATH):
+            dlg = OutputPathDialog(
+                self,
+                c.OUTPUT_ROOT,
+                hint_text="최초 조회 전 엑셀 파일이 저장될 폴더를 확인하거나 변경하세요.\n(기본값: 프로그램 설치 폴더 안 output)",
+            )
+            if dlg.exec() != QDialog.DialogCode.Accepted or dlg.result_path is None:
+                return None
+            save_output_root(dlg.result_path, CONFIG_PATH)
+            self.log(f"엑셀 저장 경로 설정: {get_output_root(path=CONFIG_PATH)}")
+
+        out_root = get_output_root(path=CONFIG_PATH)
+        ok, err = validate_output_dir(out_root)
+        if ok:
+            return out_root
+        QMessageBox.warning(self, "엑셀 저장 경로 오류", f"{err}\n\n사용 가능한 저장 폴더를 다시 선택하세요.")
+        dlg = OutputPathDialog(
+            self,
+            c.OUTPUT_ROOT,
+            hint_text="기존 저장 경로를 찾을 수 없습니다. 새 저장 폴더를 선택하세요.",
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted or dlg.result_path is None:
+            return None
+        save_output_root(dlg.result_path, CONFIG_PATH)
+        out_root = get_output_root(path=CONFIG_PATH)
+        self.log(f"엑셀 저장 경로 변경: {out_root}")
+        return out_root
 
     def open_output_dir(self) -> None:
-        out_root = get_output_root()
-        out_root.mkdir(parents=True, exist_ok=True)
+        out_root = get_output_root(path=CONFIG_PATH)
+        ok, err = validate_output_dir(out_root)
+        if not ok:
+            QMessageBox.warning(self, "엑셀 저장 경로 오류", f"{err}\n\n저장 폴더를 먼저 지정해 주세요.")
+            self.open_output_dir_settings()
+            return
         os.startfile(str(out_root))
 
     def _on_main_start_finished(self) -> None:
@@ -644,6 +677,7 @@ class App(QMainWindow):
         cfg = read_config(CONFIG_PATH)
         if self.session_cfg:
             cfg = {**cfg, **self.session_cfg}
+        cfg["outputRoot"] = str(get_output_root(cfg, CONFIG_PATH))
         cfg["_profile_dir"] = str(BASE_DIR / "output" / "chrome-sabre-profile")
         return cfg
 
@@ -736,6 +770,8 @@ class App(QMainWindow):
             )
             if ans != QMessageBox.StandardButton.Yes:
                 return
+        if self._ensure_valid_output_root() is None:
+            return
         self._begin_running()
         threading.Thread(target=self.worker, args=(planned,), daemon=True).start()
 

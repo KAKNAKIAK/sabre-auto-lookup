@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-OUTPUT_ROOT = Path(r"G:\내 드라이브\안티그래비티\workspace\04. 요금조회\01. 항공")
+_APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+OUTPUT_ROOT = _APP_DIR / "output"
 MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 PREMIUM = set("FAJCDIZR")
 SOLD = "예약마감"

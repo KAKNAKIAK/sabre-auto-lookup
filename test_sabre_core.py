@@ -1354,6 +1354,99 @@ class CoreTest(unittest.TestCase):
             gui.close()
             qt_app.processEvents()
 
+    def test_output_root_default_first_run_prompt_and_validation(self):
+        import time
+        from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+        import sabre_app as app_mod
+
+        # 1) 기본 저장 경로는 G: 하드코딩이 아닌 앱 설치 폴더 내 output
+        self.assertEqual(c.OUTPUT_ROOT.name, "output")
+        self.assertNotIn("내 드라이브", str(c.OUTPUT_ROOT))
+
+        qt_app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            cfg_path = tmp / "sabre-config.json"
+            routes_path = tmp / "sabre-routes.json"
+            seed = [c.normalize_route({"origin": "ICN", "destination": "BKK", "airline": "ZE",
+                                       "depFlight": "ZE511", "retFlight": "ZE512", "days": "3", "endDate": "2027-10-31"})]
+            c.save_routes(routes_path, seed)
+
+            # 쓰기 가능 폴더는 통과, 없는 경로(파일 하위에 폴더 생성 시도)는 실패
+            ok, err = app_mod.validate_output_dir(tmp / "ok_out")
+            self.assertTrue(ok, err)
+            blocker = tmp / "not_a_dir"
+            blocker.write_text("x", encoding="utf-8")
+            bad_ok, bad_err = app_mod.validate_output_dir(blocker / "child")
+            self.assertFalse(bad_ok)
+            self.assertTrue(bad_err)
+
+            orig_cfg, orig_rp, orig_dlg, orig_warn = app_mod.CONFIG_PATH, app_mod.ROUTES_PATH, app_mod.OutputPathDialog, QMessageBox.warning
+            app_mod.CONFIG_PATH, app_mod.ROUTES_PATH = cfg_path, routes_path
+            gui = app_mod.App()
+            dialog_calls = []
+            warns = []
+            worker_runs = []
+            next_pick = [None]
+
+            class FakeOutDlg:
+                def __init__(self, _parent, current, hint_text=None):
+                    dialog_calls.append((str(current), hint_text))
+                    self.result_path = next_pick[0]
+
+                def exec(self):
+                    return QDialog.DialogCode.Accepted if self.result_path else QDialog.DialogCode.Rejected
+
+            try:
+                app_mod.OutputPathDialog = FakeOutDlg
+                QMessageBox.warning = staticmethod(lambda _p, title, msg: warns.append((title, msg)))
+                gui.worker = lambda planned: worker_runs.append(planned)
+                gui.job_entries[0][1].setChecked(True)
+                gui.start_edit.setText("2026-12-01")
+                gui.end_edit.setText("2026-12-05")
+
+                # 2) 최초 미지정 + 취소 -> 조회 시작 안 함
+                next_pick[0] = None
+                gui.start_run()
+                self.assertEqual(len(dialog_calls), 1)
+                self.assertEqual(len(worker_runs), 0)
+
+                # 3) 최초 미지정 + 확인 -> 경로 저장 후 조회 시작
+                picked = tmp / "my_fares"
+                next_pick[0] = str(picked)
+                gui.start_run()
+                for _ in range(30):
+                    if worker_runs:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(len(dialog_calls), 2)
+                self.assertEqual(len(worker_runs), 1)
+                self.assertTrue(app_mod.has_saved_output_root(path=cfg_path))
+                self.assertEqual(app_mod.get_output_root(path=cfg_path), picked)
+                gui.reset_buttons()
+
+                # 4) 2회차 실행 -> 팝업 없이 즉시 실행
+                gui.start_run()
+                for _ in range(30):
+                    if len(worker_runs) >= 2:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(len(dialog_calls), 2)
+                self.assertEqual(len(worker_runs), 2)
+                gui.reset_buttons()
+
+                # 5) 저장된 경로가 접근 불가해진 경우 -> 조회 전 경고 후 재선택 팝업
+                app_mod.save_output_root(blocker / "broken", cfg_path)
+                next_pick[0] = None
+                gui.start_run()
+                self.assertEqual(len(warns), 1)
+                self.assertEqual(len(dialog_calls), 3)
+                self.assertEqual(len(worker_runs), 2)
+            finally:
+                app_mod.CONFIG_PATH, app_mod.ROUTES_PATH, app_mod.OutputPathDialog, QMessageBox.warning = orig_cfg, orig_rp, orig_dlg, orig_warn
+                gui.close()
+                qt_app.processEvents()
+
 
 if __name__ == "__main__":
     unittest.main()
