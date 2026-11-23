@@ -1334,6 +1334,22 @@ class CoreTest(unittest.TestCase):
             self.assertFalse(gui.windowIcon().isNull())
             help_labels = [a.text() for a in gui.help_menu.actions()]
             self.assertIn("업데이트 확인", help_labels)
+            self.assertIn("사용 안내", help_labels)
+
+            # HTML 매뉴얼(index.html) 및 참조 이미지 무결성 + 폴백 확인
+            import re
+            root_dir = Path(__file__).resolve().parent
+            idx_file = root_dir / "index.html"
+            self.assertTrue(idx_file.exists())
+            html_text = idx_file.read_text(encoding="utf-8")
+            srcs = re.findall(r'src="([^"]+)"', html_text)
+            self.assertGreaterEqual(len(srcs), 9)
+            for s in srcs:
+                if s and not s.startswith(("http://", "https://")):
+                    self.assertTrue((root_dir / s).exists(), f"missing manual asset: {s}")
+            resolved = app_mod.resolve_manual_target("http://127.0.0.1:1/unreachable", timeout=0.2)
+            self.assertTrue(resolved.startswith("file:///"))
+            self.assertTrue(resolved.endswith("index.html"))
         finally:
             gui.close()
             qt_app.processEvents()

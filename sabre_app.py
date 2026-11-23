@@ -5,6 +5,8 @@ import os
 import sys
 import threading
 import ctypes
+import urllib.request
+import webbrowser
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -29,6 +31,28 @@ from sabre_ui import (
     matches_route_query, read_config, save_login_config, save_output_root,
     show, toggle_window_maximize,
 )
+
+MANUAL_URL = "https://kaknakiak.github.io/sabre-auto-lookup/"
+
+
+def resolve_manual_target(remote_url: str = MANUAL_URL, timeout: float = 2.5) -> str:
+    """GitHub Pages 매뉴얼이 열려 있으면 우선 사용하고, 미개방/오프라인 시 로컬 index.html로 폴백한다."""
+    if remote_url:
+        try:
+            req = urllib.request.Request(remote_url, method="HEAD", headers={"User-Agent": "SabreAutoLookup/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if 200 <= getattr(resp, "status", 200) < 400:
+                    return remote_url
+        except Exception:
+            pass
+    candidates = [BASE_DIR / "index.html", Path(__file__).resolve().parent / "index.html"]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "index.html")
+    for p in candidates:
+        if p.exists():
+            return p.resolve().as_uri()
+    return remote_url
 
 
 class App(QMainWindow):
@@ -353,21 +377,13 @@ class App(QMainWindow):
         self.start_run()
 
     def show_help(self) -> None:
-        QMessageBox.information(
-            self,
-            "도움말",
-            f"항공운임 조회 (SABRE VER.) {u.APP_VERSION} 주요 조작\n\n"
-            "• Alt+Enter : 창 최대화 / 원래 크기 전환\n"
-            "• Ctrl+Q : 프로그램 끝내기\n"
-            "• Ctrl+L : 로그인 정보 설정\n"
-            "• Ctrl+E : 엑셀 저장 경로 설정\n"
-            "• Ctrl+R : 조회 노선 관리 (추가·수정·복사·삭제·검색·CSV)\n"
-            "• 노선 행 더블클릭 / F2 : 인라인 수정 (Enter 저장 / Esc 취소)\n"
-            "• 노선 관리 Ctrl+C / Ctrl+V : 셀 복사 / 붙여넣기 (여러 셀 일괄 붙여넣기)\n"
-            "• 텍스트 칸 ↑ / ↓ : 칸 내 맨 앞 / 맨 끝 커서 이동\n"
-            "• 빈칸 우클릭 : 노선 추가  |  노선 행 우클릭 : 복사 / 삭제\n"
-            "• 도움말 > 업데이트 확인 : GitHub 릴리즈 최신 버전 확인 및 자동 설치",
-        )
+        self.log("HTML 사용 안내 매뉴얼을 브라우저로 여는 중...")
+
+        def worker() -> None:
+            target = resolve_manual_target(MANUAL_URL)
+            webbrowser.open(target)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def check_for_updates(self, manual: bool = True) -> None:
         if self._update_checking:

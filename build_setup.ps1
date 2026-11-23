@@ -69,9 +69,23 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $PortableDir "assets") | Out-Null
     $EmptyRoutesJson = '{"schema": "sabre-routes-v1", "routes": []}' + [Environment]::NewLine
     $SampleCsvSrc = Join-Path $ProjectRoot "sabre-routes.example.csv"
+    $IconPngSrc = Join-Path $ProjectRoot "assets\sabre_icon.png"
+    $IndexHtmlSrc = Join-Path $ProjectRoot "index.html"
+    $ManualImgDir = Join-Path $ProjectRoot "docs\manual_images"
     try {
         Copy-Item -LiteralPath $BuiltExe -Destination (Join-Path $PortableDir $AppExeName) -Force -ErrorAction Stop
         Copy-Item -LiteralPath $IconPath -Destination (Join-Path $PortableDir "assets\sabre_icon.ico") -Force -ErrorAction Stop
+        if (Test-Path -LiteralPath $IconPngSrc) {
+            Copy-Item -LiteralPath $IconPngSrc -Destination (Join-Path $PortableDir "assets\sabre_icon.png") -Force
+        }
+        if (Test-Path -LiteralPath $IndexHtmlSrc) {
+            Copy-Item -LiteralPath $IndexHtmlSrc -Destination (Join-Path $PortableDir "index.html") -Force
+        }
+        if (Test-Path -LiteralPath $ManualImgDir) {
+            $PortImgDir = Join-Path $PortableDir "docs\manual_images"
+            New-Item -ItemType Directory -Force -Path $PortImgDir | Out-Null
+            Copy-Item -Path "$ManualImgDir\*.png" -Destination $PortImgDir -Force
+        }
         [System.IO.File]::WriteAllText((Join-Path $PortableDir "sabre-routes.json"), $EmptyRoutesJson, $Utf8NoBom)
         if (Test-Path -LiteralPath $SampleCsvSrc) {
             Copy-Item -LiteralPath $SampleCsvSrc -Destination (Join-Path $PortableDir "sabre-routes.example.csv") -Force
@@ -88,6 +102,17 @@ try {
 
     Copy-Item -LiteralPath $BuiltExe -Destination (Join-Path $PayloadDir $AppExeName) -Force
     Copy-Item -LiteralPath $IconPath -Destination (Join-Path $PayloadDir "assets\sabre_icon.ico") -Force
+    if (Test-Path -LiteralPath $IconPngSrc) {
+        Copy-Item -LiteralPath $IconPngSrc -Destination (Join-Path $PayloadDir "assets\sabre_icon.png") -Force
+    }
+    if (Test-Path -LiteralPath $IndexHtmlSrc) {
+        Copy-Item -LiteralPath $IndexHtmlSrc -Destination (Join-Path $PayloadDir "index.html") -Force
+    }
+    if (Test-Path -LiteralPath $ManualImgDir) {
+        $PayImgDir = Join-Path $PayloadDir "docs\manual_images"
+        New-Item -ItemType Directory -Force -Path $PayImgDir | Out-Null
+        Copy-Item -Path "$ManualImgDir\*.png" -Destination $PayImgDir -Force
+    }
     [System.IO.File]::WriteAllText((Join-Path $PayloadDir "sabre-routes.json"), $EmptyRoutesJson, $Utf8NoBom)
     if (Test-Path -LiteralPath $SampleCsvSrc) {
         Copy-Item -LiteralPath $SampleCsvSrc -Destination (Join-Path $PayloadDir "sabre-routes.example.csv") -Force

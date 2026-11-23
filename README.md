@@ -1,6 +1,8 @@
-# 세이버자동조회
+# 항공운임 조회 (SABRE VER.)
 
 Sabre Red Web(`srw.sabre.com`)에서 실시간 `WPNCB` 왕복 최저가 기본운임(`KRW`)을 백그라운드로 수집해 날짜별 엑셀(`.xlsx`)로 저장하는 Windows 자동화 프로그램입니다.
+
+> **사용 안내 매뉴얼 (이미지 가이드)**: [온라인 매뉴얼 보기 (GitHub Pages)](https://kaknakiak.github.io/sabre-auto-lookup/) · 로컬 파일: [index.html](index.html)
 
 ## 핵심 특징
 
