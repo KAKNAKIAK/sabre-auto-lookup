@@ -790,7 +790,7 @@ def launch_and_login(cfg: dict, log, stop: threading.Event, force_relogin: bool 
         existing_srw = find_target("srw.sabre.com")
         if existing_srw and not force_relogin:
             try:
-                term = Terminal.connect(prefer_api=False)
+                term = Terminal.connect(prefer_api=True)
                 term.close()
                 log("이미 로그인된 Sabre 작업창이 정상 응답합니다(I -> IGD).")
                 return True

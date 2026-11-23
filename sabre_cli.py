@@ -26,7 +26,7 @@ def _split_csv(value: str | None) -> list[str]:
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    cfg["_profile_dir"] = str(BASE_DIR / "output" / "chrome-sabre-profile")
+    cfg["_profile_dir"] = str(BASE_DIR / ".chrome-sabre-profile")
     return cfg
 
 

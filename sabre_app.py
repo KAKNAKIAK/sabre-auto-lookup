@@ -21,15 +21,14 @@ from PySide6.QtWidgets import (
 import sabre_core as c
 import sabre_terminal as t
 import sabre_updater as u
-from sabre_manage import InlineComboBox, InlineLineEdit, ManageWindow
+from sabre_manage import ManageWindow
 from sabre_ui import (
-    APP_QSS, BASE_DIR, COL_WIDTHS, CONFIG_PATH, CRED_KEYS, ENABLED_CHOICES,
-    FARE_CHOICES, FIELDS, MANAGE_COLS, MANAGE_HEADERS, ROUTES_PATH, SEARCH_KEYS,
+    BASE_DIR, CONFIG_PATH, FIELDS, MANAGE_COLS, ROUTES_PATH,
     EndDatePreviewDialog, LoginDialog, LogWindow, OutputPathDialog, SingleDateResultDialog,
-    add_months, apply_theme, bind_alt_enter, clear_remembered_login,
-    format_date_edit, get_output_root, has_saved_login, has_saved_output_root,
-    load_app_icon, mask_secret, matches_route_query, read_config, save_login_config,
-    save_output_root, show, toggle_window_maximize, validate_output_dir,
+    add_months, apply_theme, clear_remembered_login, format_date_edit,
+    get_output_root, has_saved_login, has_saved_output_root, load_app_icon,
+    mask_secret, matches_route_query, read_config, save_login_config,
+    save_output_root, toggle_window_maximize, validate_output_dir,
 )
 
 MANUAL_URL = "https://kaknakiak.github.io/sabre-auto-lookup/"
@@ -678,7 +677,7 @@ class App(QMainWindow):
         if self.session_cfg:
             cfg = {**cfg, **self.session_cfg}
         cfg["outputRoot"] = str(get_output_root(cfg, CONFIG_PATH))
-        cfg["_profile_dir"] = str(BASE_DIR / "output" / "chrome-sabre-profile")
+        cfg["_profile_dir"] = str(BASE_DIR / ".chrome-sabre-profile")
         return cfg
 
     def login(self) -> None:
