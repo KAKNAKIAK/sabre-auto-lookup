@@ -300,7 +300,14 @@ def _price_itinerary(term: Terminal, airline: str, org: str, dst: str, out_no: i
     text = term.cmd("WPNCB", settle=settle)
     if "NO LOWER FARE" in text.upper() and not FARE_PRESENT_RE.search(text):
         text = term.cmd("WP", settle=settle)
-    return c.parse_wpncb(text, airline, org, dst, out_no, ret_no, d1, d2, pax=pax, fare_only=fare_only)
+    term._last_wpncb = text
+    res = c.parse_wpncb(text, airline, org, dst, out_no, ret_no, d1, d2, pax=pax, fare_only=fare_only)
+    if isinstance(res, int):
+        term._last_reason = ""
+    else:
+        head = next((ln.strip() for ln in text.splitlines() if ln.strip()), "응답 없음")[:80]
+        term._last_reason = f"운임계산 불가: {head}" if res == c.ERR else f"운임 마감: {head}"
+    return res
 
 
 def _query_long_sell(term: Terminal, route: dict, days: int, dep: date, settle: float) -> int | str:
@@ -329,16 +336,27 @@ def _query_via_avail(term: Terminal, route: dict, days: int, dep: date, settle: 
     pax, req_cls, fare_only = c.route_pax(route), c.route_class(route), c.route_fare_only(route)
     ret = dep + timedelta(days)
     if "IGD" not in term.cmd("I", settle=settle):
+        term._last_reason = "여정 초기화(I) 응답 없음"
         return c.ERR
-    for d, frm, to, no in ((dep, org, dst, out_no), (ret, dst, org, ret_no)):
+    for leg, d, frm, to, no in (("출국편", dep, org, dst, out_no), ("귀국편", ret, dst, org, ret_no)):
         row = find_flight(term, f"1{c.ddmmm(d)}{frm}{to}¥{airline}", airline, no, c.ddmmm(d), settle)
         if row is None:
+            term._last_reason = f"{leg} 미운항/가용없음: {c.ddmmm(d)} {airline}{no}"
             return c.ERR
         cls = (req_cls if row["classes"].get(req_cls, 0) >= pax else None) if req_cls else c.open_class(row["classes"], pax=pax)
         if cls is None:  # 요청 클래스(또는 이코노미) 잔여석 부족이면 세그를 잡지 않고 바로 마감
+            if req_cls:
+                rem = row["classes"].get(req_cls)
+                rem_txt = f"잔여 {rem}석" if rem is not None else "클래스 없음"
+                term._last_reason = f"{leg} {req_cls}클래스 {pax}석 마감 ({c.ddmmm(d)} {airline}{no}, {rem_txt})"
+            else:
+                term._last_reason = f"{leg} 이코노미 {pax}석 마감 ({c.ddmmm(d)} {airline}{no})"
             return c.SOLD
-        state = c.sell_state(term.cmd(f"0{pax}{cls}{row['line']}", settle=settle), airline, no, c.ddmmm(d), pax=pax)
+        sell_out = term.cmd(f"0{pax}{cls}{row['line']}", settle=settle)
+        state = c.sell_state(sell_out, airline, no, c.ddmmm(d), pax=pax)
         if state != "ok":
+            head = next((ln.strip() for ln in sell_out.splitlines() if ln.strip()), "응답 없음")[:70]
+            term._last_reason = f"{leg} 임시판매 거절 ({c.ddmmm(d)} {airline}{no} {cls} {pax}석: {head})"
             return c.SOLD if state == "sold" else c.ERR
     return _price_itinerary(term, airline, org, dst, out_no, ret_no, c.ddmmm(dep), c.ddmmm(ret), pax, fare_only, settle)
 
@@ -442,7 +460,7 @@ def run_job(route: dict, days: int, start: date, end: date, today: date, log, st
             return None
         errors = [d for d, v in results.items() if v == c.ERR]  # 마감·운임은 재조회하지 않음
         if errors:
-            log(f"조회오류 {len(errors)}일 1회 재조회")
+            log(f"조회불가 {len(errors)}일 1회 재조회")
             for dep in errors:
                 if stop.is_set():
                     break
@@ -459,6 +477,76 @@ def run_job(route: dict, days: int, start: date, end: date, today: date, log, st
     except SessionExpired:
         c.save_workbook(path, basis, results)
         raise
+    finally:
+        term.close()
+
+
+def _query_roundtrip_detail(term: Terminal, route: dict, dep: date, ret_dep: date) -> tuple[int | str, dict | None]:
+    days = (ret_dep - dep).days
+    term._last_wpncb = ""
+    fare = query_date(term, route, days, dep)
+    if not isinstance(fare, int):
+        return fare, None
+    raw_wp = getattr(term, "_last_wpncb", "")
+    detail = c.parse_quote_detail(raw_wp)
+    if detail is not None and len(detail.get("segments") or []) < 2:
+        try:
+            detail = c.parse_quote_detail(raw_wp, seg_text=term.cmd("*I"))
+        except Exception:
+            pass
+    return fare, detail
+
+
+def query_by_korea_dates(term: Terminal, route: dict, dep: date, arr: date) -> tuple[int | str, dict | None]:
+    """한국출발일(dep)·한국도착일(arr) 기준으로 조회하며, 야간 귀국편(+1 익일 도착)은 자동으로 arr-1 출발로 보정한다."""
+    fare, detail = _query_roundtrip_detail(term, route, dep, arr)
+    if isinstance(fare, int) and detail and len(detail.get("segments") or []) >= 2:
+        if c.seg_arrival_offset(detail["segments"][1]) == 1 and arr > dep:
+            return _query_roundtrip_detail(term, route, dep, arr - timedelta(1))
+        return fare, detail
+    # arr 당일 귀국편이 비운항/마감인 경우, arr-1 출발 야간편(+1일 도착=arr)이 있는지 확인 후 재조회한다.
+    first_reason = getattr(term, "_last_reason", "")
+    if arr > dep:
+        prev_ret = arr - timedelta(1)
+        airline, org, dst = route["airline"], route["origin"], route["destination"]
+        ret_no = c.flight_no(route["retFlight"], airline)
+        row = find_flight(term, f"1{c.ddmmm(prev_ret)}{dst}{org}¥{airline}", airline, ret_no, c.ddmmm(prev_ret), 0.25)
+        if row and row.get("nextDay"):
+            return _query_roundtrip_detail(term, route, dep, prev_ret)
+    term._last_reason = first_reason
+    return fare, detail
+
+
+def run_single_date(planned: list[tuple[dict, int, date, date]], log, stop: threading.Event,
+                    background: bool = True, cfg: dict | None = None) -> list[dict]:
+    """선택된 노선들의 한국출발일~한국도착일 왕복 운임과 세그·택스 상세를 수집한다(엑셀 저장 없음)."""
+    term = _connect_or_relogin(cfg, log, stop, background, force_relogin=False)
+    records: list[dict] = []
+    total = max(1, len(planned))
+    try:
+        for idx, (route, days, dep, arr) in enumerate(planned, 1):
+            if stop.is_set():
+                break
+            fare: int | str = c.ERR
+            detail: dict | None = None
+            for attempt in range(2):
+                try:
+                    fare, detail = query_by_korea_dates(term, route, dep, arr)
+                    break
+                except SessionExpired as exc:
+                    if not cfg or stop.is_set() or attempt >= 1:
+                        raise
+                    log(f"{route['depFlight']} 조회 중 세션 만료({exc}) -> 자동 재로그인")
+                    term.close()
+                    term = _connect_or_relogin(cfg, log, stop, background, force_relogin=True)
+            reason = "" if isinstance(fare, int) else getattr(term, "_last_reason", "")
+            records.append({"route": route, "days": days, "dep": dep, "arr": arr, "fare": fare, "detail": detail, "reason": reason})
+            log(f"[{idx}/{total}] {route['depFlight']} {dep}~{arr} {fare}" + (f" ({reason})" if reason else ""), (idx, total))
+        try:
+            term.cmd("I")
+        except Exception:
+            pass
+        return records
     finally:
         term.close()
 

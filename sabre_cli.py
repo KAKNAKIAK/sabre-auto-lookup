@@ -146,12 +146,9 @@ def main(argv: list[str] | None = None) -> int:
             break
 
     group_summaries = []
-    for grp, entries in grouped_done.items():
-        if len(entries) >= 2:
-            sum_path = c.group_summary_path(grp, c.route_region(entries[0][0]), today, root=cfg.get("outputRoot"))
-            c.save_group_summary_workbook(sum_path, grp, entries)
-            group_summaries.append(str(sum_path))
-            log(f"그룹 최저가 통합 완료: {sum_path}")
+    for sum_path in c.save_group_summaries(grouped_done, today, root=cfg.get("outputRoot")):
+        group_summaries.append(str(sum_path))
+        log(f"그룹 최저가 통합 완료: {sum_path}")
 
     ok = bool(completed) and not failed
     payload = {"ok": ok, "elapsedSec": round(time.monotonic() - t0, 1), "completed": completed, "failed": failed}

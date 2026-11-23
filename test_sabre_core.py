@@ -168,6 +168,25 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(c.parse_wpncb(raw_2pax, *args, pax=2, fare_only=True), 364000)
         self.assertEqual(c.parse_wpncb(raw_2pax, *args, pax=2, fare_only=False), 619400)
         self.assertEqual(c.parse_wpncb(raw_api, *args, pax=2, fare_only=True), c.ERR)
+        # 나트랑(CXR)은 Sabre 운임계산식에 도시코드 NHA로 출력된다
+        cxr_api = (
+            "FARE  KRW    286200  \n"
+            "TAX   KRW     24000BP KRW     26700JC KRW    239900XT\n"
+            "TOTAL KRW    576800\n"
+            " SEL ZE NHA106.60ZE SEL106.60NUC213.20END ROE1342.36847\n"
+            " 1 ZE 561R 01DEC 2 ICNCXR SS4  2050  0020  02DEC 3 /DCZE /E\n"
+            " 2 ZE 562R 04DEC 5 CXRICN SS4  0155  0850  /DCZE /E\n"
+        )
+        self.assertEqual(c.parse_wpncb(cxr_api, "ZE", "ICN", "CXR", 561, 562, "01DEC", "04DEC", pax=4, fare_only=True), 286200)
+        self.assertEqual(c.parse_wpncb(cxr_api, "ZE", "ICN", "CXR", 561, 562, "01DEC", "04DEC", pax=4, fare_only=False), 576800)
+        # CITY 매핑에 없는 신규 공항(예: ZZZ -> QQQ)도 출·귀국 세그 2줄이 정확히 일치하면 정상 파싱
+        unmapped_api = (
+            "FARE  KRW    310000\nTOTAL KRW    450000\n"
+            " SEL KE QQQ100.00KE SEL100.00NUC200.00END\n"
+            " 1 KE 901Y 01DEC 2 ICNZZZ SS2  1000  1300  /DCKE /E\n"
+            " 2 KE 902Y 04DEC 5 ZZZICN SS2  1500  1800  /DCKE /E\n"
+        )
+        self.assertEqual(c.parse_wpncb(unmapped_api, "KE", "ICN", "ZZZ", 901, 902, "01DEC", "04DEC", pax=2, fare_only=True), 310000)
 
     def test_pax_class_and_total_fare_query_once(self):
         self.assertEqual(c.open_class({"J": 9, "Y": 2, "B": 5}, pax=4), "B")
@@ -508,241 +527,333 @@ class CoreTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "2행 오류"):
                 c.import_routes_csv(bad_path)
 
-    def test_inline_row_edit_and_comboboxes(self):
-        from PySide6.QtCore import Qt
-        from PySide6.QtGui import QKeyEvent
-        from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QMessageBox
+    def _run_with_gui(self, routes, fn):
+        from PySide6.QtWidgets import QApplication
         qt_app = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as tmp:
             routes_path = Path(tmp) / "sabre-routes.json"
-            c.save_routes(routes_path, [
-                c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
-                                   "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": "2027-10-31"})
-            ])
+            c.save_routes(routes_path, routes)
             orig_path = app_mod.ROUTES_PATH
             app_mod.ROUTES_PATH = routes_path
             gui = app_mod.App()
             try:
-                self.assertIsNone(gui.manage_win)
-                gui.open_manage_window()
-                mgr = gui.manage_win
-                self.assertIsNotNone(mgr)
-                gui.open_manage_window()
-                self.assertIs(gui.manage_win, mgr)  # 중복 창 생성 방지
-                mgr.start_row_edit(0, focus_col=app_mod.MANAGE_COLS.index("pax"))
-                self.assertIsNotNone(mgr.edit_state)
-                self.assertIsInstance(mgr.edit_state["widgets"]["fareOnly"], QComboBox)
-                self.assertIsInstance(mgr.edit_state["widgets"]["enabled"], QComboBox)
-                self.assertIsInstance(mgr.edit_state["widgets"]["pax"], QLineEdit)
-                self.assertIn("startDate", mgr.edit_state["widgets"])
-                rg_edit = mgr.edit_state["widgets"]["routeGroup"]
-                rg_edit.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier))
-                self.assertEqual(rg_edit.cursorPosition(), len(rg_edit.text()))
-                rg_edit.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier))
-                self.assertEqual(rg_edit.cursorPosition(), 0)
-                mgr.edit_state["widgets"]["pax"].setText("4")
-                mgr.edit_state["widgets"]["bookingClass"].setText("S")
-                mgr.edit_state["widgets"]["startDate"].setText("2026-12-15")
-                mgr.edit_state["widgets"]["fareOnly"].setCurrentText("TOTAL KRW")
-                mgr.edit_state["widgets"]["enabled"].setCurrentText("중지")
-                self.assertTrue(mgr.commit_row_edit())
-                self.assertIsNone(mgr.edit_state)
-                saved = c.load_routes(routes_path)
-                self.assertEqual((saved[0]["startDate"], saved[0]["pax"], saved[0]["bookingClass"], saved[0]["fareOnly"], saved[0]["enabled"]),
-                                 ("2026-12-15", 4, "S", False, False))
-                self.assertEqual(c.effective_start(saved[0], date(2026, 11, 23)), date(2026, 12, 15))
-                self.assertEqual(c.effective_start(saved[0], date(2027, 1, 5)), date(2027, 1, 5))
-                # 노선 추가 후 Esc 취소 시 임시 행이 제거되고 목록은 변하지 않아야 한다
-                mgr.add_route_row()
-                self.assertEqual(mgr.table.rowCount(), 2)
-                mgr.cancel_row_edit()
-                self.assertEqual(mgr.table.rowCount(), 1)
-                self.assertEqual(len(gui.routes), 1)
-                # 노선 복사 시 선택 행 바로 아래에 복제되고 선택·포커스가 복사 행으로 이동해야 한다
-                mgr.table.setCurrentCell(0, 0)
-                mgr.copy_route_row()
-                self.assertEqual(len(gui.routes), 2)
-                self.assertEqual(mgr.table.currentRow(), 1)
-                self.assertEqual(gui.routes[1], gui.routes[0])
-                self.assertIsNot(gui.routes[1]["days"], gui.routes[0]["days"])
-                # 연속된 동일 노선그룹은 0열 병합, 개별 행 편집 시 임시 해제 후 취소 시 복원
-                self.assertEqual(mgr.table.rowSpan(0, 0), 2)
-                mgr.start_row_edit(1, focus_col=0)
-                self.assertEqual(mgr.table.rowSpan(0, 0), 1)
-                mgr.cancel_row_edit()
-                self.assertEqual(mgr.table.rowSpan(0, 0), 2)
-                # 우클릭 메뉴: 빈칸 -> 노선 추가, 기존 행 -> 해당 행 선택 + 노선 복사/노선 삭제
-                m_blank = mgr.build_context_menu(-1)
-                self.assertEqual([a.text() for a in m_blank.actions()], ["노선 추가"])
-                m_row = mgr.build_context_menu(0)
-                self.assertEqual(mgr.table.currentRow(), 0)
-                self.assertEqual([a.text() for a in m_row.actions()], ["노선 복사", "노선 삭제"])
-                # 빈 신규 노선 행에서 입력 없이 나가면 경고 후 삭제
-                warned = []
-                orig_warn = QMessageBox.warning
-                QMessageBox.warning = staticmethod(lambda _p, title, msg: warned.append((title, msg)))
-                try:
-                    mgr.add_route_row()
-                    self.assertEqual(mgr.table.rowCount(), 3)
-                    self.assertEqual(
-                        (mgr.edit_state["widgets"]["pax"].text(), mgr.edit_state["widgets"]["bookingClass"].text(),
-                         mgr.edit_state["widgets"]["fareOnly"].currentText(), mgr.edit_state["widgets"]["enabled"].currentText()),
-                        ("4", "Y", "FARE KRW", "사용"),
-                    )
-                    self.assertTrue(mgr.commit_row_edit())
-                    self.assertEqual(len(warned), 1)
-                    self.assertEqual(mgr.table.rowCount(), 2)
-                    self.assertEqual(len(gui.routes), 2)
-                finally:
-                    QMessageBox.warning = orig_warn
-                # 부분 입력 노선 행은 저장되지만 자동조회(group_routes/job_entries/CLI)에는 노출되지 않음
-                mgr.add_route_row()
-                mgr.edit_state["widgets"]["origin"].setText("ICN")
-                mgr.edit_state["widgets"]["airline"].setText("KE")
-                self.assertTrue(mgr.commit_row_edit())
-                self.assertEqual(len(gui.routes), 3)
-                self.assertFalse(c.is_complete_route(gui.routes[2]))
-                self.assertEqual(gui.job_entries, [])  # 0·1번은 중지, 2번은 미완성
-                self.assertEqual(cli.select_jobs(gui.routes, select_all=True), [])
-                # 나머지 필수 필드를 모두 채우면 즉시 자동조회에 노출됨
-                mgr.start_row_edit(2, focus_col=2)
-                mgr.edit_state["widgets"]["destination"].setText("DAD")
-                mgr.edit_state["widgets"]["depFlight"].setText("KE457")
-                mgr.edit_state["widgets"]["retFlight"].setText("KE458")
-                mgr.edit_state["widgets"]["days"].setText("2,3")
-                mgr.edit_state["widgets"]["endDate"].setText("2027-10-31")
-                self.assertTrue(mgr.commit_row_edit())
-                self.assertTrue(c.is_complete_route(gui.routes[2]))
-                self.assertEqual(len(gui.job_entries), 2)
-                # 개별 노선 체크박스는 항상 선택 가능하고, 1개만 체크해도 전체해제로 전환됨
-                g0, cb0, _, _ = gui.job_entries[0]
-                _, cb1, _, _ = gui.job_entries[1]
-                self.assertTrue(cb0.isEnabled())
-                self.assertEqual(gui.group_cards[g0][1].text(), "전체선택")
-                cb0.setChecked(True)
-                gui.update_detail_states()
-                self.assertFalse(cb1.isChecked())
-                self.assertEqual(gui.group_cards[g0][1].text(), "전체해제")
-                self.assertEqual(len(gui.selected_jobs()), 1)
-                gui.toggle_group_jobs(g0)
-                self.assertFalse(cb0.isChecked())
-                self.assertFalse(cb1.isChecked())
-                self.assertEqual(gui.group_cards[g0][1].text(), "전체선택")
-                self.assertEqual(gui.selected_jobs(), [])
-                # 메인 검색바: 필터링 및 검색어 변경 후에도 기존 선택 유지
-                gui.main_search_edit.setText("KE457")
-                self.assertFalse(gui.group_cards[g0][0].isHidden())
-                cb0.setChecked(True)
-                gui.main_search_edit.setText("NO_MATCH_XYZ")
-                self.assertTrue(gui.group_cards[g0][0].isHidden())
-                self.assertEqual(len(gui.selected_jobs()), 1)
-                gui.main_search_edit.setText("")
-                self.assertFalse(gui.group_cards[g0][0].isHidden())
-                cb0.setChecked(False)
-                # 노선 검색: 노선그룹~귀국편 유연 검색 및 필터 상태에서도 원본 인덱스 유지
-                mgr.search_edit.setText("KE 458")
-                self.assertEqual([mgr._row_route_index(r) for r in range(mgr.table.rowCount())], [2])
-                mgr.search_edit.setText("icndad")
-                self.assertEqual([mgr._row_route_index(r) for r in range(mgr.table.rowCount())], [2])
-                mgr.search_edit.setText("tao")
-                self.assertEqual([mgr._row_route_index(r) for r in range(mgr.table.rowCount())], [0, 1])
-                mgr.search_edit.setText("")
-                self.assertEqual([mgr._row_route_index(r) for r in range(mgr.table.rowCount())], [0, 1, 2])
-                # F2 키로 선택 행 인라인 편집 진입
-                mgr.table.setCurrentCell(2, 0)
-                mgr.on_f2()
-                self.assertIsNotNone(mgr.edit_state)
-                self.assertEqual(mgr.edit_state["row"], 2)
-                mgr.cancel_row_edit()
-                # 상단 메뉴바(파일·설정·도움말), 파일 > 끝내기(Ctrl+Q), 설정 3종 확인
-                top_labels = [a.text() for a in gui.menuBar().actions()]
-                self.assertEqual(top_labels, ["파일", "설정", "도움말"])
-                self.assertEqual(gui.quit_action.text(), "끝내기")
-                self.assertEqual(gui.quit_action.shortcut().toString(), "Ctrl+Q")
-                settings_labels = [a.text() for a in gui.settings_menu.actions()]
-                self.assertEqual(settings_labels, ["로그인 정보", "엑셀 저장 경로", "조회 노선 관리"])
-                # 저장된 로그인 정보가 있으면 LoginDialog에 마스킹 표시되고 빈칸은 기존 값 유지
-                dlg = app_mod.LoginDialog(gui, saved_cfg={"agentId": "4028", "password": "secret", "pcc": "R4D8", "remember": True}, submit_label="저장")
-                self.assertIn("4**8", dlg.saved_summary_text)
-                self.assertIn("******", dlg.saved_summary_text)
-                self.assertIn("R**8", dlg.saved_summary_text)
-                self.assertNotIn("secret", dlg.saved_summary_text)
-                dlg.pw_edit.setText("newpw")
-                dlg.submit()
-                self.assertEqual(dlg.result_data, {"agentId": "4028", "password": "newpw", "pcc": "R4D8", "remember": True})
-                # 엑셀 저장 경로 설정 팝업
-                out_dlg = app_mod.OutputPathDialog(gui, Path(tmp))
-                out_dlg.path_edit.setText(str(Path(tmp) / "fares"))
-                out_dlg.submit()
-                self.assertEqual(out_dlg.result_path, str(Path(tmp) / "fares"))
-                # 시작일 기본값(오늘+3일) 및 한달/분기/반기/일년 종료일 프리셋 확인
-                from datetime import timedelta as td
-                self.assertEqual(gui.start_edit.text(), (date.today() + td(3)).isoformat())
-                gui.start_edit.setText("2026-01-31")
-                gui.set_end_preset(1)
-                self.assertEqual(gui.end_edit.text(), "2026-02-28")
-                gui.set_end_preset(3)
-                self.assertEqual(gui.end_edit.text(), "2026-04-30")
-                gui.set_end_preset(6)
-                self.assertEqual(gui.end_edit.text(), "2026-07-31")
-                gui.set_end_preset(12)
-                self.assertEqual(gui.end_edit.text(), "2027-01-31")
-                # 전체 진행바: 2개 노선(2일 + 3일 = 총 5일) 누적 진행률 검증
-                prog_events = []
-                orig_run, orig_log = t.run_job, gui.log
-                def fake_run_job(route, days, start, end, today, log, stop, **_kw):
-                    n = (end - start).days + 1
-                    for i in range(1, n + 1):
-                        log(f"[{i}/{n}]", (i, n))
-                    return Path(tmp) / f"{route['airline']}_{days}.xlsx"
-                gui.log = lambda msg, progress=None: prog_events.append(progress) if progress else None
-                t.run_job = fake_run_job
-                try:
-                    r1 = {**gui.routes[2], "endDate": "2026-12-02"}
-                    r2 = {**gui.routes[2], "airline": "OZ", "depFlight": "OZ101", "endDate": "2026-12-03"}
-                    # 그룹 통합 엑셀 생성 방지를 위해 다른 routeGroup 사용
-                    r2["routeGroup"] = "ICN-DAD-OZ"
-                    gui.worker([(r1, 2, date(2026, 12, 1), date(2026, 12, 2)),
-                                (r2, 3, date(2026, 12, 1), date(2026, 12, 3))])
-                    self.assertEqual(prog_events, [(0, 5), (1, 5), (2, 5), (2, 5), (3, 5), (4, 5), (5, 5), (5, 5)])
-                finally:
-                    t.run_job, gui.log = orig_run, orig_log
-                # 날짜 교집합(max 시작일, min 종료일) 및 종료일 공란/역전 실행 전 알럿 검증
-                r_no_end = c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
-                                              "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": ""})
-                self.assertTrue(c.is_complete_route(r_no_end))
-                self.assertIsNone(c.effective_end(r_no_end, None))
-                self.assertEqual(c.effective_end(r_no_end, date(2027, 5, 1)), date(2027, 5, 1))
-                r_bounded = c.normalize_route({"origin": "ICN", "destination": "BKK", "airline": "LJ",
-                                               "depFlight": "LJ001", "retFlight": "LJ002", "days": "3",
-                                               "startDate": "2026-12-10", "endDate": "2027-02-26"})
-                self.assertEqual(c.effective_end(r_bounded, date(2027, 11, 1)), date(2027, 2, 26))
-                self.assertEqual(c.effective_end(r_bounded, date(2027, 1, 15)), date(2027, 1, 15))
-                valid_p, issues_p = c.plan_jobs([(r_no_end, 2), (r_bounded, 3)], date(2027, 3, 1), None)
-                self.assertEqual(valid_p, [])
-                self.assertEqual(len(issues_p), 2)
-                self.assertIn("종료일이 설정되지 않았습니다", issues_p[0])
-                self.assertIn("실제 시작일", issues_p[1])
-                # GUI start_run 실행 전 알럿 확인
-                warns = []
-                orig_w = QMessageBox.warning
-                QMessageBox.warning = staticmethod(lambda _p, title, msg: warns.append((title, msg)))
-                try:
-                    gui.job_entries[0][1].setChecked(True)
-                    gui.start_edit.setText("2028-01-01")
-                    gui.end_edit.setText("")
-                    gui.start_run()
-                    self.assertEqual(len(warns), 1)
-                    self.assertIn("실제 시작일", warns[0][1])
-                    self.assertTrue(gui.run_btn.isEnabled())
-                finally:
-                    QMessageBox.warning = orig_w
-                mgr.close()
-                qt_app.processEvents()
+                fn(gui, Path(tmp), routes_path, qt_app)
             finally:
                 app_mod.ROUTES_PATH = orig_path
                 gui.close()
                 qt_app.processEvents()
+
+    def test_manage_window_inline_edit_merge_copy_paste(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtWidgets import QComboBox, QLineEdit, QMessageBox
+
+        seed = [c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
+                                   "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": "2027-10-31"})]
+
+        def body(gui, tmp, routes_path, qt_app):
+            self.assertIsNone(gui.manage_win)
+            gui.open_manage_window()
+            mgr = gui.manage_win
+            self.assertIsNotNone(mgr)
+            gui.open_manage_window()
+            self.assertIs(gui.manage_win, mgr)
+            mgr.start_row_edit(0, focus_col=app_mod.MANAGE_COLS.index("pax"))
+            self.assertIsNotNone(mgr.edit_state)
+            self.assertIsInstance(mgr.edit_state["widgets"]["fareOnly"], QComboBox)
+            self.assertIsInstance(mgr.edit_state["widgets"]["enabled"], QComboBox)
+            self.assertIsInstance(mgr.edit_state["widgets"]["pax"], QLineEdit)
+            self.assertIn("startDate", mgr.edit_state["widgets"])
+            rg_edit = mgr.edit_state["widgets"]["routeGroup"]
+            rg_edit.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier))
+            self.assertEqual(rg_edit.cursorPosition(), len(rg_edit.text()))
+            rg_edit.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier))
+            self.assertEqual(rg_edit.cursorPosition(), 0)
+            mgr.edit_state["widgets"]["pax"].setText("4")
+            mgr.edit_state["widgets"]["bookingClass"].setText("S")
+            mgr.edit_state["widgets"]["startDate"].setText("2026-12-15")
+            mgr.edit_state["widgets"]["fareOnly"].setCurrentText("TOTAL KRW")
+            mgr.edit_state["widgets"]["enabled"].setCurrentText("중지")
+            self.assertTrue(mgr.commit_row_edit())
+            self.assertIsNone(mgr.edit_state)
+            saved = c.load_routes(routes_path)
+            self.assertEqual((saved[0]["startDate"], saved[0]["pax"], saved[0]["bookingClass"], saved[0]["fareOnly"], saved[0]["enabled"]),
+                             ("2026-12-15", 4, "S", False, False))
+            self.assertEqual(c.effective_start(saved[0], date(2026, 11, 23)), date(2026, 12, 15))
+            self.assertEqual(c.effective_start(saved[0], date(2027, 1, 5)), date(2027, 1, 5))
+            mgr.add_route_row()
+            self.assertEqual(mgr.table.rowCount(), 2)
+            mgr.cancel_row_edit()
+            self.assertEqual(mgr.table.rowCount(), 1)
+            mgr.table.setCurrentCell(0, 0)
+            mgr.copy_route_row()
+            self.assertEqual((len(gui.routes), mgr.table.currentRow()), (2, 1))
+            self.assertIsNot(gui.routes[1]["days"], gui.routes[0]["days"])
+            self.assertEqual(mgr.table.rowSpan(0, 0), 2)
+            mgr.start_row_edit(1, focus_col=0)
+            self.assertEqual(mgr.table.rowSpan(0, 0), 1)
+            mgr.cancel_row_edit()
+            self.assertEqual(mgr.table.rowSpan(0, 0), 2)
+            self.assertEqual([a.text() for a in mgr.build_context_menu(-1).actions()], ["노선 추가", "붙여넣기로 노선 추가"])
+            self.assertEqual(mgr.blank_zone.height(), 52)
+            self.assertEqual(mgr.table.verticalScrollMode(), mgr.table.ScrollMode.ScrollPerPixel)
+            self.assertEqual([a.text() for a in mgr.build_context_menu(0).actions()], ["노선 복사", "노선 삭제"])
+            self.assertEqual(mgr.table.currentRow(), 0)
+            warned = []
+            orig_warn = QMessageBox.warning
+            QMessageBox.warning = staticmethod(lambda _p, title, msg: warned.append((title, msg)))
+            try:
+                mgr.add_route_row()
+                self.assertEqual(
+                    (mgr.edit_state["widgets"]["pax"].text(), mgr.edit_state["widgets"]["bookingClass"].text(),
+                     mgr.edit_state["widgets"]["fareOnly"].currentText(), mgr.edit_state["widgets"]["enabled"].currentText()),
+                    ("4", "Y", "FARE KRW", "사용"),
+                )
+                self.assertTrue(mgr.commit_row_edit())
+                self.assertEqual((len(warned), len(gui.routes)), (1, 2))
+            finally:
+                QMessageBox.warning = orig_warn
+            mgr.add_route_row()
+            mgr.edit_state["widgets"]["origin"].setText("ICN")
+            mgr.edit_state["widgets"]["airline"].setText("KE")
+            self.assertTrue(mgr.commit_row_edit())
+            self.assertFalse(c.is_complete_route(gui.routes[2]))
+            self.assertEqual(gui.job_entries, [])
+            self.assertEqual(cli.select_jobs(gui.routes, select_all=True), [])
+            mgr.start_row_edit(2, focus_col=2)
+            mgr.edit_state["widgets"]["destination"].setText("DAD")
+            mgr.edit_state["widgets"]["depFlight"].setText("KE457")
+            mgr.edit_state["widgets"]["retFlight"].setText("KE458")
+            mgr.edit_state["widgets"]["days"].setText("2,3")
+            mgr.edit_state["widgets"]["endDate"].setText("2027-10-31")
+            self.assertTrue(mgr.commit_row_edit())
+            self.assertTrue(c.is_complete_route(gui.routes[2]))
+            mgr.search_edit.setText("KE 458")
+            self.assertEqual([mgr._row_route_index(r) for r in range(mgr.table.rowCount())], [2])
+            mgr.search_edit.setText("icndad")
+            self.assertEqual([mgr._row_route_index(r) for r in range(mgr.table.rowCount())], [2])
+            mgr.search_edit.setText("tao")
+            self.assertEqual([mgr._row_route_index(r) for r in range(mgr.table.rowCount())], [0, 1])
+            mgr.search_edit.setText("")
+            self.assertEqual([mgr._row_route_index(r) for r in range(mgr.table.rowCount())], [0, 1, 2])
+            mgr.table.setCurrentCell(2, 0)
+            mgr.on_f2()
+            self.assertEqual(mgr.edit_state["row"], 2)
+            mgr.cancel_row_edit()
+            end_col = app_mod.MANAGE_COLS.index("endDate")
+            mgr.table.clearSelection()
+            mgr.table.setCurrentCell(2, end_col)
+            self.assertEqual(mgr.copy_selected_cells(), "2027-10-31")
+            mgr.table.item(0, end_col).setSelected(True)
+            mgr.table.item(1, end_col).setSelected(True)
+            self.assertTrue(mgr.paste_to_selected_cells("2027/12/25"))
+            self.assertEqual((gui.routes[0]["endDate"], gui.routes[1]["endDate"]), ("2027-12-25", "2027-12-25"))
+            mgr.table.clearSelection()
+            mgr.table.setCurrentCell(0, app_mod.MANAGE_COLS.index("pax"))
+            self.assertTrue(mgr.paste_to_selected_cells("3\tM\n2\tQ\n"))
+            self.assertEqual((gui.routes[0]["pax"], gui.routes[0]["bookingClass"]), (3, "M"))
+            self.assertEqual((gui.routes[1]["pax"], gui.routes[1]["bookingClass"]), (2, "Q"))
+            errs = []
+            orig_crit = QMessageBox.critical
+            QMessageBox.critical = staticmethod(lambda _p, title, msg: errs.append((title, msg)))
+            try:
+                mgr.table.clearSelection()
+                mgr.table.setCurrentCell(0, app_mod.MANAGE_COLS.index("pax"))
+                self.assertFalse(mgr.paste_to_selected_cells("99"))
+                self.assertEqual((len(errs), gui.routes[0]["pax"]), (1, 3))
+            finally:
+                QMessageBox.critical = orig_crit
+            mgr.table.clearSelection()
+            mgr.table.setCurrentCell(2, 0)
+            excel_tsv = (
+                "노선그룹\t출발지\t도착지\t항공사\t출국편\t귀국편\t항공일수\t조회시작일\t조회종료일\t조회인원\t조회클래스\t운임기준\t사용\n"
+                "ICN-DAD\tICN\tDAD\tKE\tKE457\tKE458\t2,3\t\t2027-10-31\t4\tY\tFARE KRW\t사용\n"
+                "ICN-BKK-LCC\tICN\tBKK\tLJ\tLJ001\tLJ002\t3\t2026/12/1\t2027/2/26\t4\tY\tTOTAL KRW\t중지\n"
+            )
+            self.assertTrue(mgr.paste_to_selected_cells(excel_tsv))
+            self.assertEqual(len(gui.routes), 4)
+            self.assertEqual((gui.routes[3]["routeGroup"], gui.routes[3]["depFlight"], gui.routes[3]["startDate"],
+                              gui.routes[3]["endDate"], gui.routes[3]["fareOnly"], gui.routes[3]["enabled"]),
+                             ("ICN-BKK-LCC", "LJ001", "2026-12-01", "2027-02-26", False, False))
+            # 노선 추가(신규 인라인 행) 상태에서 4개 행 붙여넣기 시 4개 신규 노선 즉시 추가
+            four_rows = (
+                "ICN-NEW\tICN\tBKK\tLJ\tLJ101\tLJ102\t3\t\t2027-03-01\t4\tY\tFARE KRW\t사용\n"
+                "ICN-NEW\tICN\tBKK\tTW\tTW201\tTW202\t3\t\t2027-03-01\t4\tY\tFARE KRW\t사용\n"
+                "ICN-NEW\tICN\tBKK\tYP\tYP301\tYP302\t3\t\t2027-03-01\t4\tY\tFARE KRW\t사용\n"
+                "ICN-NEW\tICN\tBKK\tZE\tZE401\tZE402\t3\t\t2027-03-01\t4\tY\tFARE KRW\t사용\n"
+            )
+            mgr.add_route_row()
+            mgr._handle_inline_multi_paste(four_rows, 0)
+            self.assertIsNone(mgr.edit_state)
+            self.assertEqual(len(gui.routes), 8)
+            self.assertEqual([r["depFlight"] for r in gui.routes[4:]], ["LJ101", "TW201", "YP301", "ZE401"])
+            # 빈 공간 붙여넣기(force_append=True)로도 4개 행이 기존 행 덮어쓰기 없이 신규 추가됨
+            self.assertTrue(mgr.paste_to_selected_cells(four_rows, force_append=True))
+            self.assertEqual(len(gui.routes), 12)
+            mgr.close()
+            qt_app.processEvents()
+            gui.routes = [
+                c.normalize_route({"routeGroup": "ICN-BKK-LCC", "origin": "ICN", "destination": "BKK", "airline": "LJ",
+                                   "depFlight": "LJ001", "retFlight": "LJ002", "days": "3", "endDate": "2027-02-26"}),
+                c.normalize_route({"routeGroup": "ICN-TAO-KE", "origin": "ICN", "destination": "TAO", "airline": "KE",
+                                   "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": "2027-10-31"}),
+                c.normalize_route({"routeGroup": "ICN-DAD-KE", "origin": "ICN", "destination": "DAD", "airline": "KE",
+                                   "depFlight": "KE457", "retFlight": "KE458", "days": "3", "endDate": "2027-10-31"}),
+            ]
+            gui.open_manage_window()
+            self.assertEqual([c.route_group(r) for r in gui.routes], ["ICN-TAO-KE", "ICN-DAD-KE", "ICN-BKK-LCC"])
+            self.assertEqual(list(gui.group_cards.keys()), ["ICN-TAO-KE", "ICN-DAD-KE", "ICN-BKK-LCC"])
+            gui.manage_win.close()
+
+        self._run_with_gui(seed, body)
+
+    def test_main_window_cards_search_and_menus(self):
+        seed = [c.normalize_route({"origin": "ICN", "destination": "DAD", "airline": "KE",
+                                   "depFlight": "KE457", "retFlight": "KE458", "days": "2,3", "endDate": "2027-10-31"})]
+
+        def body(gui, tmp, _rp, _qt):
+            self.assertEqual(len(gui.job_entries), 2)
+            g0, cb0, _, _ = gui.job_entries[0]
+            _, cb1, _, _ = gui.job_entries[1]
+            self.assertTrue(cb0.isEnabled())
+            self.assertEqual(gui.group_cards[g0][1].text(), "전체선택")
+            cb0.setChecked(True)
+            gui.update_detail_states()
+            self.assertFalse(cb1.isChecked())
+            self.assertEqual((gui.group_cards[g0][1].text(), gui.all_toggle_btn.text()), ("전체해제", "전체 해제"))
+            gui.toggle_all_jobs()
+            self.assertEqual((gui.group_cards[g0][1].text(), gui.all_toggle_btn.text(), gui.selected_jobs()),
+                             ("전체선택", "전체 선택", []))
+            gui.main_search_edit.setText("KE457")
+            self.assertFalse(gui.group_cards[g0][0].isHidden())
+            cb0.setChecked(True)
+            gui.main_search_edit.setText("NO_MATCH_XYZ")
+            self.assertTrue(gui.group_cards[g0][0].isHidden())
+            self.assertEqual(len(gui.selected_jobs()), 1)
+            gui.main_search_edit.setText("")
+            self.assertFalse(gui.group_cards[g0][0].isHidden())
+            self.assertFalse(gui.isMaximized())
+            app_mod.toggle_window_maximize(gui)
+            self.assertTrue(gui.isMaximized())
+            app_mod.toggle_window_maximize(gui)
+            self.assertFalse(gui.isMaximized())
+            self.assertEqual([a.text() for a in gui.menuBar().actions()], ["파일", "설정", "도움말"])
+            self.assertEqual((gui.quit_action.text(), gui.quit_action.shortcut().toString()), ("끝내기", "Ctrl+Q"))
+            self.assertEqual([a.text() for a in gui.settings_menu.actions()], ["로그인 정보", "엑셀 저장 경로", "조회 노선 관리"])
+            dlg = app_mod.LoginDialog(gui, saved_cfg={"agentId": "4028", "password": "secret", "pcc": "R4D8", "remember": True}, submit_label="저장")
+            self.assertIn("4**8", dlg.saved_summary_text)
+            self.assertIn("******", dlg.saved_summary_text)
+            self.assertIn("R**8", dlg.saved_summary_text)
+            self.assertNotIn("secret", dlg.saved_summary_text)
+            dlg.pw_edit.setText("newpw")
+            dlg.submit()
+            self.assertEqual(dlg.result_data, {"agentId": "4028", "password": "newpw", "pcc": "R4D8", "remember": True})
+            out_dlg = app_mod.OutputPathDialog(gui, tmp)
+            out_dlg.path_edit.setText(str(tmp / "fares"))
+            out_dlg.submit()
+            self.assertEqual(out_dlg.result_path, str(tmp / "fares"))
+
+        self._run_with_gui(seed, body)
+
+    def test_main_window_dates_progress_and_single_date(self):
+        import time
+        from datetime import timedelta as td
+        from PySide6.QtWidgets import QMessageBox
+
+        seed = [c.normalize_route({"origin": "ICN", "destination": "DAD", "airline": "KE",
+                                   "depFlight": "KE457", "retFlight": "KE458", "days": "2,3", "endDate": "2027-10-31"})]
+
+        def body(gui, tmp, _rp, _qt):
+            self.assertEqual(gui.start_edit.text(), (date.today() + td(3)).isoformat())
+            gui.start_edit.setText("20261205")
+            gui.start_edit.editingFinished.emit()
+            self.assertEqual(gui.start_edit.text(), "2026-12-05")
+            gui.end_edit.setText("20270315")
+            gui.end_edit.editingFinished.emit()
+            self.assertEqual(gui.end_edit.text(), "2027-03-15")
+            self.assertEqual(c.normalize_date_text("20261399"), "20261399")
+            gui.start_edit.setText("2026-01-31")
+            for m, exp in ((1, "2026-02-28"), (3, "2026-04-30"), (6, "2026-07-31"), (12, "2027-01-31")):
+                gui.set_end_preset(m)
+                self.assertEqual(gui.end_edit.text(), exp)
+            prog_events = []
+            orig_run, orig_log = t.run_job, gui.log
+            def fake_run_job(route, days, start, end, today, log, stop, **_kw):
+                n = (end - start).days + 1
+                for i in range(1, n + 1):
+                    log(f"[{i}/{n}]", (i, n))
+                return tmp / f"{route['airline']}_{days}.xlsx"
+            gui.log = lambda msg, progress=None: prog_events.append(progress) if progress else None
+            t.run_job = fake_run_job
+            try:
+                r1 = {**gui.routes[0], "endDate": "2026-12-02"}
+                r2 = {**gui.routes[0], "routeGroup": "ICN-DAD-OZ", "airline": "OZ", "depFlight": "OZ101", "endDate": "2026-12-03"}
+                gui.worker([(r1, 2, date(2026, 12, 1), date(2026, 12, 2)),
+                            (r2, 3, date(2026, 12, 1), date(2026, 12, 3))])
+                self.assertEqual(prog_events, [(0, 5), (1, 5), (2, 5), (2, 5), (3, 5), (4, 5), (5, 5), (5, 5)])
+            finally:
+                t.run_job, gui.log = orig_run, orig_log
+            r_no_end = c.normalize_route({"origin": "ICN", "destination": "TAO", "airline": "KE",
+                                          "depFlight": "KE843", "retFlight": "KE844", "days": "2", "endDate": ""})
+            self.assertTrue(c.is_complete_route(r_no_end))
+            self.assertIsNone(c.effective_end(r_no_end, None))
+            self.assertEqual(c.effective_end(r_no_end, date(2027, 5, 1)), date(2027, 5, 1))
+            r_bounded = c.normalize_route({"origin": "ICN", "destination": "BKK", "airline": "LJ",
+                                           "depFlight": "LJ001", "retFlight": "LJ002", "days": "3",
+                                           "startDate": "2026-12-10", "endDate": "2027-02-26"})
+            self.assertEqual(c.effective_end(r_bounded, date(2027, 11, 1)), date(2027, 2, 26))
+            self.assertEqual(c.effective_end(r_bounded, date(2027, 1, 15)), date(2027, 1, 15))
+            valid_p, issues_p = c.plan_jobs([(r_no_end, 2), (r_bounded, 3)], date(2027, 3, 1), None)
+            self.assertEqual((valid_p, len(issues_p)), ([], 2))
+            warns = []
+            orig_w = QMessageBox.warning
+            QMessageBox.warning = staticmethod(lambda _p, title, msg: warns.append((title, msg)))
+            try:
+                gui.job_entries[0][1].setChecked(True)
+                gui.start_edit.setText("2028-01-01")
+                gui.end_edit.setText("")
+                gui.start_run()
+                self.assertEqual(len(warns), 1)
+                self.assertTrue(gui.run_btn.isEnabled())
+                gui.job_entries[0][1].setChecked(False)
+            finally:
+                QMessageBox.warning = orig_w
+            gui.start_edit.setText("2027-05-01")
+            gui.end_edit.setText("")
+            gui.single_date_chk.setChecked(True)
+            self.assertEqual((gui.start_lbl.text(), gui.end_lbl.text(), gui.end_edit.text()), ("한국출발일", "한국도착일", "2027-05-04"))
+            self.assertTrue(all(b.isHidden() for b in gui.preset_btns))
+            self.assertFalse(gui.single_pax_edit.isHidden())
+            self.assertEqual((gui.single_pax_edit.text(), gui.run_btn.text(), gui.run_btn.objectName()), ("1", "▶ 최저가 확인", "SuccessBtn"))
+            self.assertEqual([cb.text() for _, cb, _, _ in gui.job_entries if not cb.isHidden()], ["KE457/458"])
+            captured_single = []
+            orig_sw = gui.single_date_worker
+            gui.single_date_worker = lambda planned, s, e, pax=1: captured_single.append((planned, s, e, pax))
+            try:
+                gui.job_entries[0][1].setChecked(True)
+                gui.single_pax_edit.setText("2")
+                gui.start_run()
+                for _ in range(30):
+                    if captured_single:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual((len(captured_single), captured_single[0][3], captured_single[0][0][0][0]["pax"]), (1, 2, 2))
+                gui.reset_buttons()
+                gui.job_entries[0][1].setChecked(False)
+            finally:
+                gui.single_date_worker = orig_sw
+            gui.single_date_chk.setChecked(False)
+            self.assertEqual((gui.start_lbl.text(), gui.end_lbl.text(), gui.end_edit.text()), ("시작일", "종료일", ""))
+            self.assertTrue(gui.single_pax_edit.isHidden())
+            self.assertEqual([cb.text() for _, cb, _, _ in gui.job_entries if not cb.isHidden()], ["KE457/458 +2", "KE457/458 +3"])
+            gui.start_edit.setText("2026-12-01")
+            gui.end_edit.setText("2026-12-05")
+            gui.single_date_chk.setChecked(True)
+            self.assertEqual(gui.end_edit.text(), "2026-12-05")
+            gui.single_date_chk.setChecked(False)
+            self.assertEqual(gui.end_edit.text(), "2026-12-05")
+
+        self._run_with_gui(seed, body)
 
     def test_cli_select_jobs_and_summary(self):
         routes = [
@@ -767,6 +878,94 @@ class CoreTest(unittest.TestCase):
             c.verify_workbook(p, "B", date(2026, 12, 1), date(2026, 12, 2))
             with self.assertRaises(ValueError):
                 c.verify_workbook(p, "B", date(2026, 12, 1), date(2026, 12, 3))
+
+    def test_single_date_quote_parse_and_lowest_format(self):
+        raw_hi = (
+            'FARE  KRW    450000  \n'
+            'TAX   KRW    255200YR\n'
+            'TOTAL KRW    705200\n'
+            ' 1 CA 440M 01MAY 6 ICNCKG SS1  1405  1700  /DCCA /E\n'
+            ' 2 CA 439M 05MAY 3 CKGICN SS1  0830  1305  /DCCA /E\n'
+        )
+        raw_lo = (
+            'FARE  KRW    410000  \n'
+            'TAX   KRW    255200YR\n'
+            'TOTAL KRW    665200\n'
+            ' 1 CA 440S 01MAY 6 ICNCKG SS1  1405  1700  /DCCA /E\n'
+            ' 2 CA 439S 05MAY 3 CKGICN SS1  0830  1305  /DCCA /E\n'
+        )
+        d_hi = c.parse_quote_detail(raw_hi)
+        d_lo = c.parse_quote_detail(raw_lo)
+        self.assertEqual((d_lo['base'], d_lo['tax'], d_lo['total']), (410000, 255200, 665200))
+        r1 = {'routeGroup': 'ICN-CKG', 'origin': 'ICN', 'destination': 'CKG', 'airline': 'CA', 'depFlight': 'CA440', 'retFlight': 'CA439'}
+        r2 = {'routeGroup': 'ICN-CKG', 'origin': 'ICN', 'destination': 'CKG', 'airline': 'CA', 'depFlight': 'CA442', 'retFlight': 'CA441'}
+        r3 = {'routeGroup': 'ICN-CKG', 'origin': 'ICN', 'destination': 'CKG', 'airline': 'CA', 'depFlight': 'CA444', 'retFlight': 'CA443'}
+        text = c.build_single_date_popup_text([
+            {'route': r1, 'days': 4, 'dep': date(2027, 5, 1), 'fare': 450000, 'detail': d_hi},
+            {'route': r2, 'days': 4, 'dep': date(2027, 5, 1), 'fare': 410000, 'detail': d_lo},
+            {'route': r3, 'days': 4, 'dep': date(2027, 5, 1), 'fare': c.ERR, 'detail': None, 'reason': '출국편 미운항/가용없음: 01MAY CA444'},
+        ], date(2027, 5, 1))
+        expected = (
+            '--------------------------------------------------------------★ 최저가\n'
+            ' 1 CA 440S 01MAY 6 ICNCKG SS1  1405  1700  /DCCA /E\n'
+            ' 2 CA 439S 05MAY 3 CKGICN SS1  0830  1305  /DCCA /E\n\n'
+            'KRW 410000\t\t\t\t\n'
+            'KRW 255200\tXT\t\n'
+            'KRW 665200\tADT\n'
+            '--------------------------------------------------------------'
+        )
+        self.assertTrue(text.startswith(expected + '\n\n[그 외 조회 결과]\n'))
+        rest = text.split('[그 외 조회 결과]\n', 1)[1]
+        self.assertNotIn('CA442/441', rest)
+        self.assertIn('1. CA440/439 | 기본 KRW 450,000', rest)
+        self.assertIn('1 CA 440M 01MAY 6 ICNCKG SS1  1405  1700  /DCCA /E', text)
+        self.assertIn('2 CA 439M 05MAY 3 CKGICN SS1  0830  1305  /DCCA /E', text)
+        self.assertIn('2. CA444/443 | 조회불가 (출국편 미운항/가용없음: 01MAY CA444)', rest)
+        # 세그 줄이 빠진 WP 응답은 *I 보조 텍스트에서 세그를 추출
+        d_star = c.parse_quote_detail('FARE KRW 410000\nTOTAL KRW 665200', seg_text=raw_lo)
+        self.assertEqual(len(d_star['segments']), 2)
+        # 4자리 편명(예: 7C2515Y처럼 항공사코드와 편번 사이 공백 없음) 세그 추출 및 익일 판별
+        raw_7c = (
+            'FARE  KRW    515000\nTOTAL KRW    825000\n'
+            ' 1 7C2515Y 01DEC 2 ICNCNX SS2  1800  2210  /DC7C /E\n'
+            ' 2 7C2516Y 04DEC 5 CNXICN SS2  2310  0620   05DEC 6 /DC7C /E\n'
+        )
+        d_7c = c.parse_quote_detail(raw_7c)
+        self.assertEqual(len(d_7c['segments']), 2)
+        self.assertEqual(c.seg_arrival_offset(d_7c['segments'][1]), 1)
+        self.assertEqual(c.parse_wpncb(raw_7c, '7C', 'ICN', 'CNX', 2515, 2516, '01DEC', '04DEC', pax=2), 515000)
+        # 야간 귀국편(+1 익일 도착) 판별 및 한국도착일 기준 arr-1 자동 보정 검증
+        self.assertEqual(c.seg_arrival_offset(' 2 CA 439S 05MAY 3 CKGICN SS1  0830  1305  /DCCA /E'), 0)
+        self.assertEqual(c.seg_arrival_offset(' 2 YP 602Y 10DEC 4 BKKICN SS1  2255  0615   11DEC 5 /DCYP /E'), 1)
+        calls = []
+        class FakeTerm:
+            _last_wpncb = ''
+        orig_qd = t.query_date
+        def fake_qd(term, route, days, dep):
+            calls.append((dep, days))
+            if days == 4:
+                term._last_wpncb = (
+                    'FARE KRW 300000\nTOTAL KRW 450000\n'
+                    ' 1 YP 601Y 07DEC 1 ICNBKK SS1  1700  2120  /DCYP /E\n'
+                    ' 2 YP 602Y 11DEC 5 BKKICN SS1  2255  0615   12DEC 6 /DCYP /E\n'
+                )
+                return 300000
+            term._last_wpncb = (
+                'FARE KRW 280000\nTOTAL KRW 430000\n'
+                ' 1 YP 601Y 07DEC 1 ICNBKK SS1  1700  2120  /DCYP /E\n'
+                ' 2 YP 602Y 10DEC 4 BKKICN SS1  2255  0615   11DEC 5 /DCYP /E\n'
+            )
+            return 280000
+        t.query_date = fake_qd
+        try:
+            yp = {'airline': 'YP', 'origin': 'ICN', 'destination': 'BKK', 'depFlight': 'YP601', 'retFlight': 'YP602'}
+            fare, detail = t.query_by_korea_dates(FakeTerm(), yp, date(2026, 12, 7), date(2026, 12, 11))
+            self.assertEqual(calls, [(date(2026, 12, 7), 4), (date(2026, 12, 7), 3)])
+            self.assertEqual(fare, 280000)
+            self.assertIn('10DEC', detail['segments'][1])
+            self.assertIn('11DEC', detail['segments'][1])
+        finally:
+            t.query_date = orig_qd
 
     def test_group_summary_workbook_matches_reference_layout(self):
         with tempfile.TemporaryDirectory() as tmp:

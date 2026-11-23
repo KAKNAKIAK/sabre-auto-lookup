@@ -15,10 +15,16 @@ OUTPUT_ROOT = Path(r"G:\내 드라이브\안티그래비티\workspace\04. 요금
 MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 PREMIUM = set("FAJCDIZR")
 SOLD = "예약마감"
-ERR = "조회오류"
+ERR = "조회불가"
 WPNCB_SOLD = ("UC SEG STATUS NOT ALLOWED", "NCB RESTRICTED ON WAILISTED", "NCB RESTRICTED ON WAITLISTED",
               "NO FARE FOR CLASS USED", "NO FARE", "UNABLE TO REBOOK", "NO COMBINABLE FARES")
-CITY = {"ICN": "SEL", "GMP": "SEL", "NRT": "TYO", "HND": "TYO", "PVG": "SHA", "PEK": "BJS", "PKX": "BJS"}
+CITY = {
+    "ICN": "SEL", "GMP": "SEL",
+    "CXR": "NHA", "DMK": "BKK", "TSA": "TPE", "TFU": "CTU",
+    "NRT": "TYO", "HND": "TYO", "KIX": "OSA", "ITM": "OSA", "CTS": "SPK",
+    "PVG": "SHA", "PEK": "BJS", "PKX": "BJS",
+    "LHR": "LON", "LGW": "LON", "CDG": "PAR", "ORY": "PAR", "FCO": "ROM", "MXP": "MIL", "JFK": "NYC", "EWR": "NYC",
+}
 ORIGIN_LABEL = {"ICN": "인천", "PUS": "부산", "GMP": "김포"}
 DEST_REGION = {"CKG": "중경", "HKT": "푸켓", "CNX": "치앙마이", "GUM": "괌", "TAO": "칭다오",
                "DAD": "다낭", "CXR": "나트랑", "PQC": "푸꾸옥", "HAN": "하노이", "SGN": "호치민"}
@@ -107,6 +113,15 @@ def flight_no(value: str, airline: str) -> int:
     return int(re.sub(r"\D", "", text) or 0)
 
 
+def flight_pair_label(route: dict) -> str:
+    al = str(route.get("airline") or "")
+    ret = str(route.get("retFlight") or "")
+    if al and ret.startswith(al):
+        ret = ret[len(al):]
+    dep = str(route.get("depFlight") or "")
+    return f"{dep}/{ret}" if ret else dep
+
+
 def parse_availability(text: str) -> list[dict]:
     """가용 화면 글자(API 원본 호스트 텍스트 및 UI innerText 모두)를 [{line, carrier, number, classes}]로 바꾼다."""
     # 1) API 원본 호스트 형식: " 1CA     440 J6 C6 D6 ... ICNCKG ...\n             R3 Y9 B9 ..."
@@ -135,7 +150,8 @@ def parse_availability(text: str) -> list[dict]:
                 else:
                     break
             if classes:
-                host_rows.append({"line": int(m.group(1)), "carrier": m.group(2), "number": int(m.group(3)), "classes": classes})
+                next_day = bool(re.search(r'\b\d{4}[¥+#]1\b', m.group(4)))
+                host_rows.append({"line": int(m.group(1)), "carrier": m.group(2), "number": int(m.group(3)), "classes": classes, "nextDay": next_day})
                 idx = j
                 continue
         idx += 1
@@ -209,17 +225,105 @@ def parse_wpncb(text: str, airline: str, origin: str, dest: str, out_no: int = 0
     out_leg = f"{city} {airline} {dest}" in up or f"{city} {airline} {dest_city}" in up
     ret_leg = f"{airline} {city}" in up or f"{airline} {origin}" in up
     # Sabre Red Web WPNCB 카드의 innerText는 여정 줄이 접혀 생략될 수 있어, 있을 때만 추가 대조한다.
-    has_seg_lines = bool(re.search(rf"\b1 {airline} \d+[A-Z]? \d{{2}}[A-Z]{{3}}\b", up))
+    has_seg_lines = bool(re.search(rf"\b1 {airline}\s*\d+[A-Z]? \d{{2}}[A-Z]{{3}}\b", up))
     segs_ok = True
     if has_seg_lines and out_no and ret_no:
-        seg1 = re.search(rf"\b1 {airline} 0*{out_no} ?[A-Z]? {out_d}\b[^\n]*\b(SS|HK|GK){pax}\b", up)
-        seg2 = re.search(rf"\b2 {airline} 0*{ret_no} ?[A-Z]? {ret_d}\b[^\n]*\b(SS|HK|GK){pax}\b", up)
+        seg1 = re.search(rf"\b1 {airline}\s*0*{out_no} ?[A-Z]? {out_d}\b[^\n]*\b{origin}{dest}\b[^\n]*\b(SS|HK|GK){pax}\b", up)
+        seg2 = re.search(rf"\b2 {airline}\s*0*{ret_no} ?[A-Z]? {ret_d}\b[^\n]*\b{dest}{origin}\b[^\n]*\b(SS|HK|GK){pax}\b", up)
         segs_ok = bool(seg1 and seg2)
-    if fare and out_leg and ret_leg and segs_ok:
+    # 세그 2줄(출·귀국 편명·날짜·공항·인원)이 모두 확인되면 운임계산식 도시코드(CITY)가 미등록 공항이어도 통과한다.
+    route_ok = segs_ok if (has_seg_lines and out_no and ret_no) else (out_leg and ret_leg)
+    if fare and route_ok:
         return int(fare.group(1).replace(",", ""))
     if any(p in up for p in WPNCB_SOLD):
         return SOLD
     return ERR
+
+
+SEG_LINE_RE = re.compile(r'^\s*[12]\s+[A-Z0-9]{2}\s*\d+[A-Z]\s+\d{2}[A-Z]{3}\b')
+
+
+def seg_arrival_offset(seg_line: str) -> int:
+    """Sabre 세그 줄에서 익일(+1) 도착 여부를 판별한다(예: '10DEC ... 2255 0615 11DEC 5' 또는 '0615¥1')."""
+    up = seg_line.upper()
+    if re.search(r'\b\d{4}[¥+#]1\b', up):
+        return 1
+    dates = re.findall(r'\b\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b', up)
+    if len(dates) >= 2 and dates[1] != dates[0]:
+        return 1
+    return 0
+
+
+def parse_quote_detail(text: str, *, seg_text: str = '') -> dict | None:
+    """WPNCB/WP 응답에서 세그 줄과 기본운임/택스/총액(1인 KRW)을 추출한다."""
+    up = re.sub(r'[ \t]+', ' ', text.upper())
+    base = tax = total = None
+    m_ui = re.search(r'\b\d+-\s*KRW\s*([\d,]+)\s+KRW\s*([\d,]+)(?:\s+[A-Z0-9]{2})?\s+KRW\s*([\d,]+)', up)
+    if m_ui:
+        base, tax, total = (int(m_ui.group(i).replace(',', '')) for i in (1, 2, 3))
+    else:
+        m_base = re.search(r'(?:^|\n)\s*FARE\s*KRW\s*([\d,]+)', up)
+        m_tot = re.search(r'(?:^|\n)\s*TOTAL\s*KRW\s*([\d,]+)', up)
+        if m_base and m_tot:
+            base = int(m_base.group(1).replace(',', ''))
+            total = int(m_tot.group(1).replace(',', ''))
+            tax = max(0, total - base)
+    if base is None or total is None or tax is None:
+        return None
+    segments = [ln.rstrip() for ln in text.splitlines() if SEG_LINE_RE.match(ln.upper())]
+    if len(segments) < 2 and seg_text:
+        segments = [ln.rstrip() for ln in seg_text.splitlines() if SEG_LINE_RE.match(ln.upper())]
+    return {'base': base, 'tax': tax, 'total': total, 'segments': segments[:2]}
+
+
+def format_single_date_quote(detail: dict) -> str:
+    bar = '-' * 62
+    segs = '\n'.join(detail.get('segments') or [])
+    return (
+        f'{bar}★ 최저가\n'
+        f'{segs}\n\n'
+        f'KRW {detail["base"]}\t\t\t\t\n'
+        f'KRW {detail["tax"]}\tXT\t\n'
+        f'KRW {detail["total"]}\tADT\n'
+        f'{bar}'
+    )
+
+
+def build_single_date_popup_text(records: list[dict], dep_date: date, arr_date: date | None = None) -> str:
+    """노선그룹별 최저가 노선을 지정 양식으로 포맷해 반환한다."""
+    span = f'{dep_date.isoformat()}~{arr_date.isoformat()}' if arr_date and arr_date != dep_date else dep_date.isoformat()
+    grouped: dict[str, list[dict]] = {}
+    for rec in records:
+        grouped.setdefault(route_group(rec['route']), []).append(rec)
+    blocks: list[str] = []
+    multi_group = len(grouped) > 1
+    for grp, items in grouped.items():
+        valid = [r for r in items if isinstance(r.get('fare'), int) and r.get('detail')]
+        best = min(valid, key=lambda r: r['fare']) if valid else None
+        if best is not None:
+            body = format_single_date_quote(best['detail'])
+        else:
+            statuses = ', '.join(f"{r['route']['depFlight']}: {r.get('fare')}" for r in items)
+            body = f'[{grp}] {span} 조회 가능한 최저가 노선이 없습니다 ({statuses})'
+        if len(items) >= 2:
+            others = [r for r in items if r is not best]
+            ordered = sorted(others, key=lambda r: (0, r['fare']) if isinstance(r.get('fare'), int) else (1, 0))
+            rows = ['[그 외 조회 결과]' if best is not None else '[노선별 조회 결과]']
+            for rank, r in enumerate(ordered, 1):
+                rt = r['route']
+                flt = flight_pair_label(rt)
+                det = r.get('detail')
+                if isinstance(r.get('fare'), int) and det:
+                    entry = f"{rank}. {flt} | 기본 KRW {det['base']:,} | 택스 KRW {det['tax']:,} | 총액 KRW {det['total']:,}"
+                    segs = '\n'.join(det.get('segments') or [])
+                    rows.append(f'{entry}\n{segs}' if segs else entry)
+                else:
+                    reason = str(r.get('reason') or '').strip()
+                    suffix = f' ({reason})' if reason else ''
+                    rows.append(f"{rank}. {flt} | {r.get('fare')}{suffix}")
+            body = body + '\n\n' + rows[0] + '\n' + '\n\n'.join(rows[1:])
+        blocks.append(f'[{grp}]\n{body}' if multi_group and best is not None else body)
+    return '\n\n'.join(blocks)
 
 
 def output_path(route: dict, days: int, today: date, root: Path | str | None = None) -> Path:
@@ -320,6 +424,18 @@ def save_group_summary_workbook(path: Path, group: str, entries: list[tuple[dict
     return path
 
 
+def save_group_summaries(grouped_done: dict[str, list[tuple[dict, int, Path]]], today: date,
+                         root: Path | str | None = None) -> list[Path]:
+    """같은 노선그룹에서 2건 이상 완료된 항목들의 최저가 통합 엑셀을 일괄 생성한다."""
+    paths: list[Path] = []
+    for grp, entries in grouped_done.items():
+        if len(entries) >= 2:
+            sum_path = group_summary_path(grp, route_region(entries[0][0]), today, root=root)
+            save_group_summary_workbook(sum_path, grp, entries)
+            paths.append(sum_path)
+    return paths
+
+
 def basis_text(route: dict, days: int) -> str:
     region = route_region(route)
     dest = "충칭" if region == "중경" else region
@@ -394,10 +510,19 @@ def _parse_csv_bool(value: str | None, *, default: bool, false_tokens: tuple[str
     return text not in false_tokens
 
 
-def _normalize_csv_date(value: str | None) -> str:
+def normalize_date_text(value: str | None) -> str:
+    """YYYYMMDD 또는 YYYY[./-]M[./-]D 입력을 유효한 날짜일 때 YYYY-MM-DD로 정규화한다."""
     text = str(value or "").strip()
-    m = re.fullmatch(r"(\d{4})[./-](\d{1,2})[./-](\d{1,2})", text)
-    return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}" if m else text
+    m = re.fullmatch(r"(\d{4})(\d{2})(\d{2})", text) or re.fullmatch(r"(\d{4})[./-](\d{1,2})[./-](\d{1,2})", text)
+    if not m:
+        return text
+    try:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+    except ValueError:
+        return text
+
+
+_normalize_csv_date = normalize_date_text
 
 
 def export_routes_csv(path: Path, routes: list[dict]) -> None:
@@ -495,10 +620,10 @@ def normalize_route(form: dict, *, allow_partial: bool = False) -> dict:
         route[k] = route[k].upper()
     if not allow_partial and (not all(route.values()) or not days):
         raise ValueError("모든 칸을 입력하세요. 항공일수는 2,3 처럼 쉼표로 여러 개 입력합니다.")
-    start_date = str(form.get("startDate") or "").strip()
+    start_date = normalize_date_text(form.get("startDate"))
     if start_date:
         date.fromisoformat(start_date)
-    end_date = str(form.get("endDate") or "").strip()
+    end_date = normalize_date_text(form.get("endDate"))
     if end_date:
         date.fromisoformat(end_date)
     pax_raw = str(form.get("pax", "1")).strip() or "1"
