@@ -70,6 +70,22 @@ def route_end_date(route: dict) -> str:
     return str(route.get("endDate") or "").strip()
 
 
+def find_expired_routes(routes: list[dict], today: date | None = None) -> list[tuple[int, dict]]:
+    """조회종료일이 오늘 이전인 노선 (인덱스, 노선) 목록을 반환한다."""
+    ref = today or date.today()
+    expired: list[tuple[int, dict]] = []
+    for idx, r in enumerate(routes):
+        ed = normalize_date_text(route_end_date(r))
+        if not ed:
+            continue
+        try:
+            if date.fromisoformat(ed) < ref:
+                expired.append((idx, r))
+        except ValueError:
+            continue
+    return expired
+
+
 def effective_start(route: dict, default_start: date) -> date:
     """노선별 조회시작일이 기준 시작일보다 늦으면 그 날짜부터 조회한다."""
     raw = route_start_date(route)
@@ -446,13 +462,17 @@ def save_group_summary_workbook(path: Path, group: str, entries: list[tuple[dict
 
 
 def save_group_summaries(grouped_done: dict[str, list[tuple[dict, int, Path]]], today: date,
-                         root: Path | str | None = None) -> list[Path]:
-    """같은 노선그룹에서 2건 이상 완료된 항목들의 최저가 통합 엑셀을 일괄 생성한다."""
+                         root: Path | str | None = None, remove_sources: bool = True) -> list[Path]:
+    """같은 노선그룹에서 2건 이상 완료된 항목들의 최저가 통합 엑셀을 생성하고(기본: 개별 파일 정리) 반환한다."""
     paths: list[Path] = []
     for grp, entries in grouped_done.items():
         if len(entries) >= 2:
             sum_path = group_summary_path(grp, route_region(entries[0][0]), today, root=root)
             save_group_summary_workbook(sum_path, grp, entries)
+            if remove_sources:
+                for _r, _d, src_path in entries:
+                    if src_path != sum_path:
+                        src_path.unlink(missing_ok=True)
             paths.append(sum_path)
     return paths
 

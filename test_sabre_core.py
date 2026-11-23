@@ -1082,6 +1082,21 @@ class CoreTest(unittest.TestCase):
                 self.assertEqual([wb2.active['B2'].value, wb2.active['C2'].value], ['LJ001(+2)', 'LJ001(+3)'])
             finally:
                 wb2.close()
+            # save_group_summaries: 2건 이상 그룹은 통합 파일만 남기고 개별 파일 삭제, 1건 그룹은 개별 파일 유지
+            p_single = root / 'single.xlsx'
+            c.save_workbook(p_single, 'B', {date(2026, 11, 20): 350000})
+            r_one = c.normalize_route({'routeGroup': 'ICN-DAD-KE', 'origin': 'ICN', 'destination': 'DAD',
+                                       'airline': 'KE', 'depFlight': 'KE457', 'retFlight': 'KE458', 'days': '3', 'endDate': '2027-10-31'})
+            sums = c.save_group_summaries(
+                {'ICN-BKK-LCC': [(r_lj, 3, p_lj), (r_tw, 4, p_tw)], 'ICN-DAD-KE': [(r_one, 3, p_single)]},
+                date(2026, 11, 23),
+                root=root,
+            )
+            self.assertEqual(len(sums), 1)
+            self.assertTrue(sums[0].exists())
+            self.assertFalse(p_lj.exists())
+            self.assertFalse(p_tw.exists())
+            self.assertTrue(p_single.exists())
 
     def test_discover_last_end_dates_and_preview_dialog(self):
         import threading
@@ -1529,6 +1544,54 @@ class CoreTest(unittest.TestCase):
                 self.assertGreaterEqual(dlg.table.rowCount(), 2)
             finally:
                 dlg.close()
+                qt_app.processEvents()
+
+    def test_startup_expired_routes_prompt_and_delete(self):
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        import sabre_app as app_mod
+
+        ref_today = date(2026, 11, 23)
+        seed = [
+            c.normalize_route({"routeGroup": "G-EXP", "origin": "ICN", "destination": "BKK", "airline": "LJ", "depFlight": "LJ001", "retFlight": "LJ002", "days": "3", "endDate": "2026-11-22"}),
+            c.normalize_route({"routeGroup": "G-TODAY", "origin": "ICN", "destination": "DAD", "airline": "KE", "depFlight": "KE457", "retFlight": "KE458", "days": "3", "endDate": "2026-11-23"}),
+            c.normalize_route({"routeGroup": "G-FUTURE", "origin": "ICN", "destination": "SGN", "airline": "KE", "depFlight": "KE471", "retFlight": "KE478", "days": "4", "endDate": "2027-03-24"}),
+            c.normalize_route({"routeGroup": "G-BLANK", "origin": "ICN", "destination": "CXR", "airline": "TW", "depFlight": "TW033", "retFlight": "TW034", "days": "3", "endDate": ""}),
+        ]
+        self.assertEqual([i for i, _ in c.find_expired_routes(seed, today=ref_today)], [0])
+
+        qt_app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            rp, bdir, cfgp = tmp / "sabre-routes.json", tmp / "backups", tmp / "sabre-config.json"
+            c.save_routes(rp, seed)
+            orig = (app_mod.ROUTES_PATH, app_mod.BACKUP_DIR, app_mod.CONFIG_PATH, QMessageBox.question)
+            app_mod.ROUTES_PATH, app_mod.BACKUP_DIR, app_mod.CONFIG_PATH = rp, bdir, cfgp
+            gui = app_mod.App()
+            prompts = []
+            answer = [QMessageBox.StandardButton.No]
+            try:
+                def fake_q(_p, title, msg, *_a):
+                    prompts.append((title, msg))
+                    return answer[0]
+                QMessageBox.question = staticmethod(fake_q)
+
+                # 1) 아니오 선택 -> 삭제 안 됨
+                self.assertEqual(gui.check_expired_routes(today=ref_today), 0)
+                self.assertEqual(len(prompts), 1)
+                self.assertIn("G-EXP", prompts[0][1])
+                self.assertEqual(len(gui.routes), 4)
+
+                # 2) 예 선택 -> 경과 행만 삭제 + 자동 백업 생성 + 카드 갱신
+                answer[0] = QMessageBox.StandardButton.Yes
+                self.assertEqual(gui.check_expired_routes(today=ref_today), 1)
+                self.assertEqual(len(gui.routes), 3)
+                self.assertNotIn("G-EXP", [c.route_group(r) for r in gui.routes])
+                self.assertNotIn("G-EXP", gui.group_cards)
+                self.assertEqual(len(c.list_route_backups(bdir)), 1)
+                self.assertEqual(c.list_route_backups(bdir)[0]["count"], 4)
+            finally:
+                app_mod.ROUTES_PATH, app_mod.BACKUP_DIR, app_mod.CONFIG_PATH, QMessageBox.question = orig
+                gui.close()
                 qt_app.processEvents()
 
 

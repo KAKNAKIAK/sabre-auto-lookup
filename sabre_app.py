@@ -97,6 +97,7 @@ class App(QMainWindow):
         self.build_auto()
         self.refresh_jobs()
         if os.environ.get("SABRE_NO_UPDATE_CHECK") != "1" and "unittest" not in sys.modules:
+            QTimer.singleShot(300, self.check_expired_routes)
             QTimer.singleShot(1500, lambda: self.check_for_updates(manual=False))
 
     def build_menu(self) -> None:
@@ -288,6 +289,38 @@ class App(QMainWindow):
             backup_dir=BACKUP_DIR,
             backup_cfg=get_backup_settings(path=CONFIG_PATH),
         )
+
+    def check_expired_routes(self, today: date | None = None) -> int:
+        expired = c.find_expired_routes(self.routes, today=today)
+        if not expired:
+            return 0
+        lines = []
+        for _idx, r in expired[:10]:
+            grp = c.route_group(r) or "(그룹 없음)"
+            flt = c.flight_pair_label(r) or "-"
+            lines.append(f"• {grp} | {flt} (종료일: {c.route_end_date(r)})")
+        if len(expired) > 10:
+            lines.append(f"• ... 외 {len(expired) - 10}건")
+        msg = (
+            f"조회종료일이 지난 노선이 {len(expired)}건 있습니다.\n\n"
+            + "\n".join(lines)
+            + "\n\n조회 노선 목록에서 삭제할까요?\n"
+            "(삭제 전 현재 목록은 자동으로 백업됩니다.)"
+        )
+        ans = QMessageBox.question(
+            self,
+            "조회종료일 경과 노선 정리",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return 0
+        drop = {idx for idx, _ in expired}
+        self.routes = [r for i, r in enumerate(self.routes) if i not in drop]
+        self.save_routes_and_refresh()
+        self.log(f"조회종료일 경과 노선 {len(expired)}건 삭제 완료")
+        return len(expired)
 
     def open_route_backup_settings(self) -> None:
         def _apply_restored(routes: list[dict]) -> None:
@@ -880,6 +913,15 @@ class App(QMainWindow):
         for sum_path in c.save_group_summaries(grouped_done, today, root=cfg.get("outputRoot")):
             done.append(str(sum_path))
             self.log(f"그룹 최저가 통합 완료: {sum_path}")
+        removed = {
+            str(p)
+            for entries in grouped_done.values()
+            if len(entries) >= 2
+            for _r, _d, p in entries
+            if not p.exists()
+        }
+        if removed:
+            done = [p for p in done if p not in removed]
         self.log("완료 파일\n" + ("\n".join(done) or "없음"))
         if failed:
             self.log("미완료\n" + "\n".join(failed))
