@@ -954,6 +954,46 @@ class CoreTest(unittest.TestCase):
             (port_dir / "sabre-config.json").write_text('{"outputRoot":"D:/fares"}\n', encoding="utf-8")
             merged = cli.load_config(top_cfg)
             self.assertEqual((merged["agentId"], merged["outputRoot"]), ("A1", "D:/fares"))
+            # 2단계 OTP 재시도 로직 및 --status JSON 점검
+            import threading
+            orig_ll = t.launch_and_login
+            calls = []
+            sleeps = []
+            try:
+                # 1단계 실패 -> 2단계 2회차 성공
+                def fake_ll(_cfg, log_fn, _stop, **kw):
+                    calls.append(kw)
+                    return len(calls) == 3
+                t.launch_and_login = fake_ll
+                ok, att, reason = cli.login_with_otp_retry({}, lambda *_: None, threading.Event(), sleep_fn=sleeps.append)
+                self.assertEqual((ok, att, reason), (True, 3, ""))
+                self.assertEqual(sleeps, [600.0, 600.0])
+                self.assertEqual(calls[0]["push_resend_interval"], 300.0)
+                self.assertEqual(calls[0]["max_push_resends"], 5)
+                self.assertEqual(calls[1]["max_push_resends"], 0)
+                # 아이디/비밀번호 오류 시 즉시 중단
+                calls.clear(); sleeps.clear()
+                def fake_auth_fail(_cfg, log_fn, _stop, **kw):
+                    log_fn("아이디/비밀번호 오류")
+                    return False
+                t.launch_and_login = fake_auth_fail
+                ok2, att2, reason2 = cli.login_with_otp_retry({}, lambda *_: None, threading.Event(), sleep_fn=sleeps.append)
+                self.assertEqual((ok2, att2), (False, 1))
+                self.assertIn("아이디/비밀번호", reason2)
+                self.assertEqual(sleeps, [])
+            finally:
+                t.launch_and_login = orig_ll
+            # read_batch_status: not_found / completed / crashed(종료 PID)
+            logs_d = root / "logs"
+            self.assertEqual(cli.read_batch_status("20261124", logs_dir=logs_d)["status"], "not_found")
+            logs_d.mkdir()
+            (logs_d / "batch_20261124.json").write_text('{"ok": true, "status": "completed", "pid": 999999, "groupSummaries": ["a.xlsx"]}', encoding="utf-8")
+            (logs_d / "batch_20261124.log").write_text("09:00:01 시작\n09:30:00 완료\n", encoding="utf-8")
+            st = cli.read_batch_status("20261124", logs_dir=logs_d)
+            self.assertEqual((st["status"], st["groupSummaries"], len(st["recentLogs"])), ("completed", ["a.xlsx"], 2))
+            (logs_d / "batch_20261125.json").write_text('{"ok": true, "status": "running", "pid": 999999}', encoding="utf-8")
+            st_dead = cli.read_batch_status("20261125", logs_dir=logs_d)
+            self.assertEqual((st_dead["status"], st_dead["ok"]), ("crashed", False))
         routes = [
             c.normalize_route({"routeGroup": "ICN-TAO", "region": "칭다오", "origin": "ICN", "destination": "TAO",
                                "airline": "KE", "depFlight": "KE843", "retFlight": "KE844", "days": "2,3", "endDate": "2027-10-31"}),
