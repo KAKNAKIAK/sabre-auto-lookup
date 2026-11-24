@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-APP_VERSION = "v1.0.6"
+APP_VERSION = "v1.0.7"
 DEFAULT_REPO = "KAKNAKIAK/sabre-auto-lookup"
 USER_AGENT = "SabreAutoLookupUpdater/1.0"
 MAX_META_BYTES = 1024 * 1024

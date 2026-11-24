@@ -459,21 +459,26 @@ class CoreTest(unittest.TestCase):
                 attempts[dep] = attempts.get(dep, 0) + 1
                 if dep == date(2026, 12, 2) and attempts[dep] == 1:
                     raise t.SessionExpired("expired mid-loop")
-                return 340000 if dep == date(2026, 12, 1) else 364000
+                if dep == date(2026, 12, 1):
+                    return 340000
+                if dep == date(2026, 12, 2):
+                    return 364000
+                return c.ERR
             t.Terminal.connect = classmethod(fake_connect)
             t.launch_and_login = fake_login
             t.query_date = fake_qd
             try:
                 route = {"region": "중경", "origin": "ICN", "destination": "CKG", "airline": "CA",
                          "depFlight": "CA440", "retFlight": "CA439"}
-                out = t.run_job(route, 3, date(2026, 12, 1), date(2026, 12, 2), date(2026, 11, 20),
+                out = t.run_job(route, 3, date(2026, 12, 1), date(2026, 12, 3), date(2026, 11, 20),
                                 lambda *_a: None, threading.Event(), background=False, cfg={"agentId": "x"})
                 self.assertIsNotNone(out)
                 self.assertEqual(relogins, 1)
                 self.assertEqual(attempts[date(2026, 12, 2)], 2)
+                self.assertEqual(attempts[date(2026, 12, 3)], 2)
                 ws = c.load_workbook(out).active
                 rows = [(r[0], r[1]) for r in ws.iter_rows(min_row=2, values_only=True)]
-                self.assertEqual(rows, [("2026-12-01", 340000), ("2026-12-02", 364000)])
+                self.assertEqual(rows, [("2026-12-01", 340000), ("2026-12-02", 364000), ("2026-12-03", c.SOLD)])
             finally:
                 c.OUTPUT_ROOT, t.Terminal.connect, t.launch_and_login, t.query_date = orig_root, orig_conn, orig_login, orig_qd
 
@@ -1007,8 +1012,9 @@ class CoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "s.xlsx"
             c.save_workbook(p, "B", {date(2026, 12, 1): 150000, date(2026, 12, 2): c.SOLD, date(2026, 12, 3): c.ERR})
+            c.verify_workbook(p, "B", date(2026, 12, 1), date(2026, 12, 3))
             s = cli.summarize_workbook(p)
-            self.assertEqual((s["totalDays"], s["fares"], s["soldOut"], s["errors"]), (3, 1, 1, 1))
+            self.assertEqual((s["totalDays"], s["fares"], s["soldOut"], s["errors"]), (3, 1, 2, 0))
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "a.xlsx"
             res = {date(2026, 12, 1): 340000, date(2026, 12, 2): c.SOLD}
@@ -1016,6 +1022,12 @@ class CoreTest(unittest.TestCase):
             c.verify_workbook(p, "B", date(2026, 12, 1), date(2026, 12, 2))
             with self.assertRaises(ValueError):
                 c.verify_workbook(p, "B", date(2026, 12, 1), date(2026, 12, 3))
+            wb_err = c.Workbook()
+            wb_err.active.append(["날짜", "운임", "B"])
+            wb_err.active.append(["2026-12-01", c.ERR])
+            wb_err.save(p)
+            with self.assertRaises(ValueError):
+                c.verify_workbook(p, "B", date(2026, 12, 1), date(2026, 12, 1))
 
     def test_single_date_quote_parse_and_lowest_format(self):
         raw_hi = (
@@ -1115,7 +1127,7 @@ class CoreTest(unittest.TestCase):
             p_lj = root / 'lj.xlsx'
             p_tw = root / 'tw.xlsx'
             c.save_workbook(p_lj, 'B', {date(2026, 11, 20): c.SOLD, date(2026, 11, 21): 260000})
-            c.save_workbook(p_tw, 'B', {date(2026, 11, 20): 308000, date(2026, 11, 21): 288000, date(2026, 11, 22): c.SOLD})
+            c.save_workbook(p_tw, 'B', {date(2026, 11, 20): 308000, date(2026, 11, 21): 288000, date(2026, 11, 22): c.ERR})
             out = c.group_summary_path('ICN-BKK-LCC', 'BKK', date(2026, 11, 20), root=root)
             c.save_group_summary_workbook(out, 'ICN-BKK-LCC', [(r_lj, 3, p_lj), (r_tw, 4, p_tw)])
             wb = c.load_workbook(out, data_only=False)
@@ -1132,6 +1144,7 @@ class CoreTest(unittest.TestCase):
                 self.assertEqual(ws['G3'].value, '=IF(ISNUMBER(F3),IFERROR(INDEX($B$2:$C$2,1,MATCH(F3,B3:C3,0)),""),"")')
                 self.assertIsNone(ws['B5'].value)
                 self.assertEqual(ws['C5'].value, c.SOLD)
+                self.assertEqual(ws['C5'].fill.start_color.rgb, 'FFFCE4D6')
             finally:
                 wb.close()
             out2 = root / 'dup.xlsx'

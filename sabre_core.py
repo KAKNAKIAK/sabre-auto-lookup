@@ -441,7 +441,7 @@ def save_group_summary_workbook(path: Path, group: str, entries: list[tuple[dict
                 if not row or row[0] is None:
                     continue
                 d_val = row[0].date() if hasattr(row[0], 'date') else date.fromisoformat(str(row[0]).strip())
-                per_date[d_val] = row[1]
+                per_date[d_val] = SOLD if row[1] == ERR else row[1]
                 all_dates.add(d_val)
         finally:
             wb_in.close()
@@ -534,7 +534,7 @@ def save_workbook(path: Path, basis: str, results: dict) -> None:
     ws = wb.active
     ws.append(["날짜", "운임", basis])
     for d in sorted(results):
-        ws.append([d.isoformat(), results[d]])
+        ws.append([d.isoformat(), SOLD if results[d] == ERR else results[d]])
     wb.save(path)
 
 
@@ -551,7 +551,7 @@ def verify_workbook(path: Path, basis: str, start: date, end: date) -> None:
         raise ValueError("C1 조회기준 불일치")
     if [r[0] for r in rows] != expected:
         raise ValueError("날짜 누락 또는 중복")
-    if not all(isinstance(r[1], int) or r[1] in (SOLD, ERR) for r in rows):
+    if not all(isinstance(r[1], int) or r[1] == SOLD for r in rows):
         raise ValueError("운임 칸 형식 오류")
 
 
