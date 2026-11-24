@@ -439,8 +439,8 @@ def _connect_or_relogin(cfg: dict | None, log, stop: threading.Event, background
 
 
 def run_job(route: dict, days: int, start: date, end: date, today: date, log, stop: threading.Event,
-            background: bool = True, cfg: dict | None = None) -> Path | None:
-    path = c.output_path(route, days, today, root=(cfg or {}).get("outputRoot"))
+            background: bool = True, cfg: dict | None = None, out_path: Path | None = None) -> Path | None:
+    path = out_path if out_path is not None else c.output_path(route, days, today, root=(cfg or {}).get("outputRoot"))
     basis = c.basis_text(route, days)
     term = _connect_or_relogin(cfg, log, stop, background, force_relogin=False)
     results: dict = {}

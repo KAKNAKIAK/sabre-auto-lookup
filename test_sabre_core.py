@@ -935,6 +935,25 @@ class CoreTest(unittest.TestCase):
         self._run_with_gui(seed, body)
 
     def test_cli_select_jobs_and_summary(self):
+        import sabre_cli as cli
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            local_rp = root / "sabre-routes.json"
+            port_dir = root / "release" / "SabreAutoLookup"
+            port_dir.mkdir(parents=True)
+            port_rp = port_dir / "sabre-routes.json"
+            r_old = [c.normalize_route({"routeGroup": "OLD-G", "origin": "ICN", "destination": "DAD", "airline": "KE", "depFlight": "KE457", "retFlight": "KE458", "days": "3", "endDate": "2027-10-31"})]
+            r_new = [c.normalize_route({"routeGroup": "NEW-G", "origin": "ICN", "destination": "BKK", "airline": "TG", "depFlight": "TG657", "retFlight": "TG658", "days": "3", "endDate": "2027-11-15"})]
+            c.save_routes(local_rp, r_old)
+            self.assertEqual(cli.resolve_routes_path(base_dir=root), local_rp)
+            c.save_routes(port_rp, r_new)
+            self.assertEqual(cli.resolve_routes_path(base_dir=root), port_rp)
+            self.assertEqual(cli.resolve_routes_path(str(local_rp), base_dir=root), local_rp)
+            top_cfg = root / "sabre-config.json"
+            top_cfg.write_text('{"agentId":"A1","password":"P1","pcc":"R4D8"}\n', encoding="utf-8")
+            (port_dir / "sabre-config.json").write_text('{"outputRoot":"D:/fares"}\n', encoding="utf-8")
+            merged = cli.load_config(top_cfg)
+            self.assertEqual((merged["agentId"], merged["outputRoot"]), ("A1", "D:/fares"))
         routes = [
             c.normalize_route({"routeGroup": "ICN-TAO", "region": "칭다오", "origin": "ICN", "destination": "TAO",
                                "airline": "KE", "depFlight": "KE843", "retFlight": "KE844", "days": "2,3", "endDate": "2027-10-31"}),
@@ -1097,6 +1116,31 @@ class CoreTest(unittest.TestCase):
             self.assertFalse(p_lj.exists())
             self.assertFalse(p_tw.exists())
             self.assertTrue(p_single.exists())
+
+            # 동일 항공사 복수 편명(TG657/658 vs TG657/656) + 동일 편명 시즌 분할(11/26 vs 02/27) 경로/헤더 충돌 없음 검증
+            r_tg1 = c.normalize_route({'routeGroup': 'TG_ICN-BKK-TG', 'origin': 'ICN', 'destination': 'BKK', 'airline': 'TG',
+                                       'depFlight': 'TG657', 'retFlight': 'TG658', 'days': '3', 'startDate': '2026-11-26', 'endDate': '2027-11-15'})
+            r_tg2 = c.normalize_route({'routeGroup': 'TG_ICN-BKK-TG', 'origin': 'ICN', 'destination': 'BKK', 'airline': 'TG',
+                                       'depFlight': 'TG657', 'retFlight': 'TG656', 'days': '3', 'startDate': '2026-11-26', 'endDate': '2027-11-15'})
+            r_tg3 = c.normalize_route({'routeGroup': 'TG_ICN-BKK-TG', 'origin': 'ICN', 'destination': 'BKK', 'airline': 'TG',
+                                       'depFlight': 'TG657', 'retFlight': 'TG656', 'days': '3', 'startDate': '2027-02-27', 'endDate': '2027-03-23'})
+            tp1 = c.temp_job_path(r_tg1, 3, date(2026, 11, 26), date(2026, 11, 24), seq=1, root=root)
+            tp2 = c.temp_job_path(r_tg2, 3, date(2026, 11, 26), date(2026, 11, 24), seq=2, root=root)
+            tp3 = c.temp_job_path(r_tg3, 3, date(2027, 2, 27), date(2026, 11, 24), seq=3, root=root)
+            self.assertEqual(len({tp1, tp2, tp3}), 3)
+            c.save_workbook(tp1, 'B', {date(2026, 11, 26): 410000})
+            c.save_workbook(tp2, 'B', {date(2026, 11, 26): 390000})
+            c.save_workbook(tp3, 'B', {date(2027, 2, 27): 370000})
+            sum_tg = c.save_group_summaries({'TG_ICN-BKK-TG': [(r_tg1, 3, tp1), (r_tg2, 3, tp2), (r_tg3, 3, tp3)]}, date(2026, 11, 24), root=root)[0]
+            wb_tg = c.load_workbook(sum_tg, data_only=False)
+            try:
+                ws_tg = wb_tg.active
+                self.assertEqual([ws_tg['B2'].value, ws_tg['C2'].value, ws_tg['D2'].value],
+                                 ['TG657/658', 'TG657/656(11/26)', 'TG657/656(02/27)'])
+                self.assertEqual((ws_tg['B3'].value, ws_tg['C3'].value), (410000, 390000))
+            finally:
+                wb_tg.close()
+            self.assertFalse(tp1.exists() or tp2.exists() or tp3.exists())
 
     def test_discover_last_end_dates_and_preview_dialog(self):
         import threading

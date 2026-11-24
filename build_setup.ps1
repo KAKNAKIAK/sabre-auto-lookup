@@ -86,7 +86,10 @@ try {
             New-Item -ItemType Directory -Force -Path $PortImgDir | Out-Null
             Copy-Item -Path "$ManualImgDir\*.png" -Destination $PortImgDir -Force
         }
-        [System.IO.File]::WriteAllText((Join-Path $PortableDir "sabre-routes.json"), $EmptyRoutesJson, $Utf8NoBom)
+        $PortRoutes = Join-Path $PortableDir "sabre-routes.json"
+        if (-not (Test-Path -LiteralPath $PortRoutes)) {
+            [System.IO.File]::WriteAllText($PortRoutes, $EmptyRoutesJson, $Utf8NoBom)
+        }
         if (Test-Path -LiteralPath $SampleCsvSrc) {
             Copy-Item -LiteralPath $SampleCsvSrc -Destination (Join-Path $PortableDir "sabre-routes.example.csv") -Force
         }

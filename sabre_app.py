@@ -874,54 +874,71 @@ class App(QMainWindow):
 
     def worker(self, planned: list[tuple[dict, int, date, date]]) -> None:
         done, failed, today = [], [], date.today()
-        grouped_done: dict[str, list[tuple[dict, int, Path]]] = {}
         cfg = self.load_cfg()
+        out_root = cfg.get("outputRoot")
+        # 같은 노선그룹끼리 묶어 순차 실행하고 그룹 완료 즉시 최저가 통합 엑셀을 생성한다.
+        by_group: dict[str, list[tuple[dict, int, date, date]]] = {}
+        for item in planned:
+            by_group.setdefault(c.route_group(item[0]), []).append(item)
         total_days = max(1, sum((end - job_start).days + 1 for _, _, job_start, end in planned))
         done_days = 0
         self.log(f"전체 조회 시작: {len(planned)}개 항목 / 총 {total_days}일", (0, total_days))
-        for route, days, job_start, end in planned:
-            day_cnt = (end - job_start).days + 1
-            name = f"{c.route_region(route)} {route['airline']} +{days}"
-            base_days = done_days
+        aborted = False
+        seq = 0
+        for grp, grp_items in by_group.items():
+            is_multi = len(grp_items) >= 2
+            grp_done: list[tuple[dict, int, Path]] = []
+            for route, days, job_start, end in grp_items:
+                seq += 1
+                day_cnt = (end - job_start).days + 1
+                name = f"{c.route_region(route)} {c.flight_pair_label(route)} +{days}"
+                base_days = done_days
 
-            def job_log(msg: str, progress=None, _base=base_days) -> None:
-                if progress:
-                    self.log(msg, (_base + progress[0], total_days))
-                else:
-                    self.log(msg)
+                def job_log(msg: str, progress=None, _base=base_days) -> None:
+                    if progress:
+                        self.log(msg, (_base + progress[0], total_days))
+                    else:
+                        self.log(msg)
 
-            self.log(f"시작: {name} ({job_start} ~ {end})")
-            try:
-                path = t.run_job(route, days, job_start, end, today, job_log, self.stop, background=True, cfg=cfg)
-            except (t.SessionExpired, RuntimeError) as exc:
-                failed.append(f"{name}: {exc}")
-                self.log(f"중단: {exc}")
-                break
-            except Exception as exc:
-                failed.append(f"{name}: {exc}")
-                self.log(f"실패: {name} {exc}")
+                self.log(f"시작: {name} ({job_start} ~ {end})")
+                job_out = c.temp_job_path(route, days, job_start, today, seq=seq, root=out_root) if is_multi else None
+                try:
+                    path = t.run_job(route, days, job_start, end, today, job_log, self.stop, background=True, cfg=cfg, out_path=job_out)
+                except (t.SessionExpired, RuntimeError) as exc:
+                    failed.append(f"{name}: {exc}")
+                    self.log(f"중단: {exc}")
+                    aborted = True
+                    break
+                except Exception as exc:
+                    failed.append(f"{name}: {exc}")
+                    self.log(f"실패: {name} {exc}")
+                    done_days += day_cnt
+                    continue
                 done_days += day_cnt
-                continue
-            done_days += day_cnt
-            if path:
-                done.append(str(path))
-                grouped_done.setdefault(c.route_group(route), []).append((route, days, path))
-                self.log(f"완료: {path}", (done_days, total_days))
-            else:
-                failed.append(f"{name}: 정지됨")
+                if path:
+                    grp_done.append((route, days, path))
+                    self.log(f"완료: {name}" if is_multi else f"완료: {path}", (done_days, total_days))
+                else:
+                    failed.append(f"{name}: 정지됨")
+                    aborted = True
+                    break
+            if len(grp_done) >= 2:
+                for sum_path in c.save_group_summaries({grp: grp_done}, today, root=out_root):
+                    done.append(str(sum_path))
+                    self.log(f"그룹 최저가 통합 완료: {sum_path}")
+            elif len(grp_done) == 1:
+                r0, d0, p0 = grp_done[0]
+                if is_multi:
+                    final_p = c.output_path(r0, d0, today, root=out_root)
+                    final_p.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(p0, final_p)
+                    p0 = final_p
+                done.append(str(p0))
+            if aborted:
                 break
-        for sum_path in c.save_group_summaries(grouped_done, today, root=cfg.get("outputRoot")):
-            done.append(str(sum_path))
-            self.log(f"그룹 최저가 통합 완료: {sum_path}")
-        removed = {
-            str(p)
-            for entries in grouped_done.values()
-            if len(entries) >= 2
-            for _r, _d, p in entries
-            if not p.exists()
-        }
-        if removed:
-            done = [p for p in done if p not in removed]
+        tmp_dir = (Path(str(out_root).strip()) if str(out_root or "").strip() else c.OUTPUT_ROOT) / ".tmp_work"
+        if tmp_dir.exists() and not any(tmp_dir.iterdir()):
+            tmp_dir.rmdir()
         self.log("완료 파일\n" + ("\n".join(done) or "없음"))
         if failed:
             self.log("미완료\n" + "\n".join(failed))

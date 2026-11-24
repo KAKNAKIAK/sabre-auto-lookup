@@ -375,19 +375,64 @@ def group_summary_path(group: str, region: str, today: date, root: Path | str | 
     return base / region / f'{today:%Y%m%d} 조회_{safe_group}_최저가통합.xlsx'
 
 
+def temp_job_path(route: dict, days: int, job_start: date, today: date, seq: int = 0,
+                  root: Path | str | None = None) -> Path:
+    """다중 편명 노선그룹 조회 시 편명/시즌별 덮어쓰기를 막는 고유 임시 엑셀 경로."""
+    base = Path(str(root).strip()) if str(root or "").strip() else OUTPUT_ROOT
+    pair = re.sub(r"[^A-Za-z0-9]+", "-", flight_pair_label(route)).strip("-") or route.get("airline", "FLT")
+    return base / ".tmp_work" / f"{today:%Y%m%d}_{seq:03d}_{pair}_+{days}_{job_start:%m%d}.xlsx"
+
+
+def _summary_col_labels(entries: list[tuple[dict, int, Path]]) -> list[str]:
+    dep_groups: dict[str, list[tuple[dict, int]]] = {}
+    for route, days, _p in entries:
+        dep_groups.setdefault(route["depFlight"], []).append((route, days))
+    raw_labels: list[str] = []
+    for route, days, _p in entries:
+        dep = route["depFlight"]
+        same_dep = dep_groups[dep]
+        if len(same_dep) == 1:
+            raw_labels.append(dep)
+            continue
+        rets = {r.get("retFlight", "") for r, _d in same_dep}
+        day_vals = {d for _r, d in same_dep}
+        base = flight_pair_label(route) if len(rets) > 1 else dep
+        same_pair_days = {d for r, d in same_dep if r.get("retFlight", "") == route.get("retFlight", "")}
+        if len(same_pair_days) > 1 or (len(rets) == 1 and len(day_vals) > 1):
+            raw_labels.append(f"{base}(+{days})")
+        else:
+            raw_labels.append(base)
+    # 동일 편명·일수의 시즌 분할 행이 겹치면 시작월일(또는 순번)로 구분한다.
+    counts: dict[str, int] = {}
+    for lbl in raw_labels:
+        counts[lbl] = counts.get(lbl, 0) + 1
+    seen: dict[str, int] = {}
+    final_labels: list[str] = []
+    for (route, _days, _p), lbl in zip(entries, raw_labels):
+        if counts[lbl] == 1:
+            final_labels.append(lbl)
+            continue
+        sd = route_start_date(route)
+        suffix = f"({sd[5:].replace('-', '/')})" if len(sd) >= 10 else ""
+        cand = f"{lbl}{suffix}" if suffix else lbl
+        if cand in seen or not suffix:
+            idx = seen.get(cand, 0) + 1
+            seen[cand] = idx
+            final_labels.append(f"{cand}#{idx}" if (idx > 1 or not suffix) else cand)
+        else:
+            seen[cand] = 1
+            final_labels.append(cand)
+    return final_labels
+
+
 def save_group_summary_workbook(path: Path, group: str, entries: list[tuple[dict, int, Path]]) -> Path:
     """한 노선그룹의 편명별 조회 엑셀을 모아 날짜별 최저가·최저가 항공 수식 시트로 저장한다."""
     if not entries:
         raise ValueError('통합할 조회 결과가 없습니다.')
-    dep_counts: dict[str, int] = {}
-    for route, _days, _p in entries:
-        dep_counts[route['depFlight']] = dep_counts.get(route['depFlight'], 0) + 1
-    col_labels: list[str] = []
+    col_labels = _summary_col_labels(entries)
     col_maps: list[dict[date, int | str]] = []
     all_dates: set[date] = set()
     for route, days, xlsx_path in entries:
-        dep = route['depFlight']
-        col_labels.append(f'{dep}(+{days})' if dep_counts[dep] > 1 else dep)
         per_date: dict[date, int | str] = {}
         wb_in = load_workbook(xlsx_path, read_only=True)
         try:

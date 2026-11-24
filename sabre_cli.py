@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 import threading
@@ -17,6 +18,21 @@ import sabre_terminal as t
 BASE_DIR = Path(__file__).resolve().parent
 ROUTES_PATH = BASE_DIR / "sabre-routes.json"
 CONFIG_PATH = BASE_DIR / "sabre-config.json"
+PORTABLE_DIR = BASE_DIR / "release" / "SabreAutoLookup"
+
+
+def resolve_routes_path(explicit: str | None = None, base_dir: Path = BASE_DIR) -> Path:
+    if explicit:
+        return Path(explicit)
+    portable = base_dir / "release" / "SabreAutoLookup" / "sabre-routes.json"
+    local = base_dir / "sabre-routes.json"
+    if portable.exists():
+        try:
+            if c.load_routes(portable):
+                return portable
+        except Exception:
+            pass
+    return local
 ALIASES = {"충칭": "중경"}
 
 
@@ -26,6 +42,14 @@ def _split_csv(value: str | None) -> list[str]:
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    port_cfg_p = path.parent / "release" / "SabreAutoLookup" / "sabre-config.json"
+    if port_cfg_p.exists() and port_cfg_p.resolve() != path.resolve():
+        try:
+            pcfg = json.loads(port_cfg_p.read_text(encoding="utf-8"))
+            if str(pcfg.get("outputRoot") or "").strip():
+                cfg["outputRoot"] = str(pcfg["outputRoot"]).strip()
+        except Exception:
+            pass
     cfg["_profile_dir"] = str(BASE_DIR / ".chrome-sabre-profile")
     return cfg
 
@@ -86,15 +110,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--days", help="항공일수(+N) 필터 쉼표 구분 (예: 2,3)")
     ap.add_argument("--start", help="조회 시작일 YYYY-MM-DD (기본: 내일)")
     ap.add_argument("--end", help="조회 종료일 YYYY-MM-DD (생략 시 노선별 종료일)")
+    ap.add_argument("--routes", help="노선 JSON 파일 경로 지정 (기본: 같은 폴더의 sabre-routes.json)")
     ap.add_argument("--no-bg", action="store_true", help="브라우저 창을 최소화하지 않음")
     args = ap.parse_args(argv)
 
-    routes = c.load_routes(ROUTES_PATH)
+    routes_path = resolve_routes_path(args.routes)
+    routes = c.load_routes(routes_path)
     log = lambda msg, _prog=None: print(msg, file=sys.stderr, flush=True)
 
     if args.list:
         grouped = c.group_routes(routes)
-        _emit({"ok": True, "groups": list(grouped.keys()),
+        _emit({"ok": True, "routesPath": str(routes_path), "groups": list(grouped.keys()),
                "routes": [r for r in routes if r.get("enabled", True) and c.is_complete_route(r)]})
         return 0
 
@@ -121,34 +147,56 @@ def main(argv: list[str] | None = None) -> int:
 
     t0, today = time.monotonic(), date.today()
     completed, failed = [], []
-    grouped_done: dict[str, list[tuple[dict, int, Path]]] = {}
+    group_summaries = []
+    out_root = cfg.get("outputRoot")
     planned, issues = c.plan_jobs(jobs, start, end_override)
     for msg in issues:
         failed.append({"job": msg.split(":", 1)[0], "reason": msg.split(":", 1)[1].strip()})
         log(f"제외: {msg}")
-    for route, days, job_start, end in planned:
-        rg = c.route_group(route)
-        name = f"{rg} {c.route_region(route)} {route['airline']} +{days}"
-        log(f"시작: {name} ({job_start} ~ {end})")
-        try:
-            path = t.run_job(route, days, job_start, end, today, log, stop, background=not args.no_bg, cfg=cfg)
-        except Exception as exc:
-            failed.append({"job": name, "reason": str(exc)})
-            log(f"실패: {name} - {exc}")
-            if isinstance(exc, (t.SessionExpired, RuntimeError)):
+    by_group: dict[str, list[tuple[dict, int, date, date]]] = {}
+    for item in planned:
+        by_group.setdefault(c.route_group(item[0]), []).append(item)
+    aborted = False
+    seq = 0
+    for rg, grp_items in by_group.items():
+        is_multi = len(grp_items) >= 2
+        grp_done: list[tuple[dict, int, Path]] = []
+        for route, days, job_start, end in grp_items:
+            seq += 1
+            name = f"{rg} {c.route_region(route)} {c.flight_pair_label(route)} +{days}"
+            log(f"시작: {name} ({job_start} ~ {end})")
+            job_out = c.temp_job_path(route, days, job_start, today, seq=seq, root=out_root) if is_multi else None
+            try:
+                path = t.run_job(route, days, job_start, end, today, log, stop, background=not args.no_bg, cfg=cfg, out_path=job_out)
+            except Exception as exc:
+                failed.append({"job": name, "reason": str(exc)})
+                log(f"실패: {name} - {exc}")
+                if isinstance(exc, (t.SessionExpired, RuntimeError)):
+                    aborted = True
+                    break
+                continue
+            if path:
+                completed.append({"job": name, **summarize_workbook(path)})
+                grp_done.append((route, days, path))
+            else:
+                failed.append({"job": name, "reason": "중단됨"})
+                aborted = True
                 break
-            continue
-        if path:
-            completed.append({"job": name, **summarize_workbook(path)})
-            grouped_done.setdefault(rg, []).append((route, days, path))
-        else:
-            failed.append({"job": name, "reason": "중단됨"})
+        if len(grp_done) >= 2:
+            for sum_path in c.save_group_summaries({rg: grp_done}, today, root=out_root):
+                group_summaries.append(str(sum_path))
+                log(f"그룹 최저가 통합 완료: {sum_path}")
+        elif len(grp_done) == 1 and is_multi:
+            r0, d0, p0 = grp_done[0]
+            final_p = c.output_path(r0, d0, today, root=out_root)
+            final_p.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(p0, final_p)
+            completed[-1]["path"] = str(final_p)
+        if aborted:
             break
-
-    group_summaries = []
-    for sum_path in c.save_group_summaries(grouped_done, today, root=cfg.get("outputRoot")):
-        group_summaries.append(str(sum_path))
-        log(f"그룹 최저가 통합 완료: {sum_path}")
+    tmp_dir = (Path(str(out_root).strip()) if str(out_root or "").strip() else c.OUTPUT_ROOT) / ".tmp_work"
+    if tmp_dir.exists() and not any(tmp_dir.iterdir()):
+        tmp_dir.rmdir()
 
     ok = bool(completed) and not failed
     payload = {"ok": ok, "elapsedSec": round(time.monotonic() - t0, 1), "completed": completed, "failed": failed}
